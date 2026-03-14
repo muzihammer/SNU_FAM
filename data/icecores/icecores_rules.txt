@@ -1,0 +1,14 @@
+density_smoothed.txt
+tortuosity_DZ.txt
+tortuosity_LIZ.txt
+
+위 3개의 파일 있어야 됨
+
+형식:
+시작점 0m 값
+data
+끝점 400m 값
+
+해상도는 상관없음
+
+density는 단조 증가해야됨
