@@ -1,0 +1,60 @@
+1. CPSW
+0.1 Depth :  69.9 Gamma :  6.1916 Median :  4.5 FWHM :  5.15 Delta :  2.6662
+0.2 Depth :  70.0 Gamma :  6.1972 Median :  4.55 FWHM :  5.25 Delta :  2.6629
+0.5 Depth :  70.0 Gamma :  6.5383 Median :  4.8 FWHM :  5.55 Delta :  2.8074
+
+2. NEEM_EU
+0.1 Depth :  76.4 Gamma :  60.3649 Median :  58.35 FWHM :  27.25 Delta :  8.834
+0.2 Depth :  76.4 Gamma :  60.6518 Median :  58.70 FWHM :  27.35 Delta :  8.8443
+0.5 Depth :  76.5 Gamma :  61.2493 Median :  59.75 FWHM :  27.65 Delta :  8.7712
+
+3. NEEM_US
+0.5 Depth :  76.5 Gamma :  62.4593 Median :  61.1 FWHM :  24.35 Delta :  7.9888
+
+4. DE-08
+0.5 Depth :  84.5 Gamma :  16.6353 Median :  14.75 FWHM :  8.25 Delta :  3.8016
+
+5. SP
+0.1 Depth :  133.1 Gamma :  189.1427 Median :  212.8 FWHM :  121.35 Delta :  32.1539
+0.5 Depth :  133.0 Gamma :  189.1256 Median :  207.9 FWHM :  119.15 Delta :  31.6628
+
+6. Megadunes
+
+7. DC
+0.1 Depth :  103.6 Gamma :  71.9705 Median :  57.05 FWHM :  57.45 Delta :  27.2534
+0.5 Depth :  103.5 Gamma :  62.4589 Median :  51.15 FWHM :  49.85 Delta :  20.1348
+1.0 Depth :  104 Gamma :  83.0426 Median :  65.05 FWHM :  66.65 Delta :  34.5003
+
+8. DML
+0.1 Depth :  75.7 Gamma :  53.1663 Median :  47.4 FWHM :  36.55 Delta :  14.0034
+0.5 Depth :  76.0 Gamma :  58.7732 Median :  53.8 FWHM :  38.95 Delta :  14.194
+
+9. NGRIP
+0.1 Depth :  72.7 Gamma :  24.4891 Median :  21.85 FWHM :  17.65 Delta :  6.5428
+0.5 Depth :  73.0 Gamma :  25.6724 Median :  23.3 FWHM :  17.75 Delta :  6.4586
+
+10. Siple
+0.1 Depth :  52.1 Gamma :  15.9299 Median :  13.1 FWHM :  12.35 Delta :  5.504
+0.3 Depth :  52.2 Gamma :  17.4676 Median :  14.1 FWHM :  13.35 Delta :  6.4478
+0.5 Depth :  52.0 Gamma :  12.373 Median :  10.75 FWHM :  9.45 Delta :  3.368
+
+11. Summit
+0.1 Depth :  78.6 Gamma :  37.9765 Median :  35.7 FWHM :  22.55 Delta :  7.6268
+0.5 Depth :  79.0 Gamma :  38.386 Median :  36.35 FWHM :  22.45 Delta :  7.4705
+
+12. WD
+0.1 Depth :  75.5 Gamma :  41.8553 Median :  39.25 FWHM :  24.05 Delta :  8.2428
+0.2 Depth :  75.4 Gamma :  41.169 Median :  38.65 FWHM :  23.85 Delta :  8.1847
+0.3 Depth :  75.6 Gamma :  42.5984 Median :  40.15 FWHM :  24.25 Delta :  8.2612
+0.4 Depth :  75.6 Gamma :  42.8425 Median :  40.5 FWHM :  24.35 Delta :  8.2539
+0.5 Depth :  75.5 Gamma :  42.8331 Median :  40.55 FWHM :  24.45 Delta :  8.2381
+
+13. DSS
+0.1 Depth :  48.1 Gamma :  29.5223 Median :  27.4 FWHM :  18.55 Delta :  6.404
+0.5 Depth :  48.0 Gamma :  27.6285 Median :  26.0 FWHM :  17.55 Delta :  5.8305
+
+
+
+
+
+

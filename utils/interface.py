@@ -13,12 +13,23 @@ class Interface:
         df_sites = pd.read_excel(C.ROOT+"sites.xlsx")
         self.sites = list()
         for i, site in df_sites.iterrows():
-            self.sites.append(Site(site["Site"], site["T[C]"], site["A[m]"], site["p[hPa]"], site["H[m]"], site["Year"], site["rho_0"], site["rho_ice [g/cm3]"], site["use_HL"] == "O"))
+            self.sites.append(Site(site["Site"], 
+                                   site["T[C]"], 
+                                   site["A[m ieq]"], 
+                                   site["p[hPa]"], 
+                                   site["H[m]"], 
+                                   site["Z[m]"], 
+                                   site["Year"], 
+                                   site["rho_0"], 
+                                   site["use_HL"] == "O"))
 
         df_gases = pd.read_excel(C.ROOT+"gases.xlsx")
         self.gases = list()
         for i, gas in df_gases.iterrows():
-            self.gases.append(Gas(gas["Gas"], gas["Mass[kg/mol]"], gas["Gamma"]))
+            self.gases.append(Gas(gas["Gas"], 
+                                  gas["Mass [kg/mol]"], 
+                                  gas["Gamma"],
+                                  gas["Lambda"]))
 
     def run(self):
         query_1 = "원하는 지역을 선택하라냥 =^._.^= ∫\n"
@@ -37,7 +48,7 @@ class Interface:
 
 
 
-        z = np.arange(0, C.Z, C.dz)
+        z = np.arange(0, site.Z, C.dz)
         t = np.arange(0, C.Time + C.dt, C.dt)
         t = site.sample_year - t
         
@@ -47,7 +58,7 @@ class Interface:
         w_air, w_ice, p = P.velocity()
         tau_DZ, tau_LIZ = P.tortuosity()
         D_X, D_eddy, D_total, s_op_star = P.diffusion()
-        gad_LID, gad_COD, gad = P.gas_age_distribution()
+        # gad_LID, gad_COD, gad = P.gas_age_distribution()
 
 
         fig, axs = plt.subplots(1, 9, figsize=(16, 8), sharey=True)
@@ -120,38 +131,15 @@ class Interface:
         plt.show()
 
 
-
-
-        # plt.plot(t, gad_LID, c='b', label='LID='+str(lid)+'m')
-        plt.plot(t, gad_COD, c='r', label='COD='+str(cod)+'m')
-        vs = np.vstack((t, gad_COD))
-        np.savetxt(C.ROOT+'GAD\\'+site.name+'.txt', vs.T)
-
-        # print(np.trapz(gad_COD, t))
-        P.printAgeIndicators(63)
-        P.printAgeIndicators(cod)
-        P.printAgeIndicators(72)
-        # print(P.Gamma, P.median, P.FWHM, P.Delta)
-        plt.plot(t, gad[int(63 / C.dz),:], label='63m')
-        plt.plot(t, gad[int(72 / C.dz),:], label='72m')
-        # plt.plot(t, gad[76 * 10,:-1], label='76m')
-        # plt.plot(t, gad[100,:-1], label='50m')
-        # plt.plot(t, gad[140,:-1], label='70m')
-        # plt.plot(t, gad[156,:-1], label='78m', c='b')
-        # plt.plot(t, gad[160,:-1], label='90m')
-        # plt.xlim(1980, 2010)
-        # plt.ylim(bottom=0, top=15E-2)
-        # plt.xlim(1890, 1990)
-        # plt.ylim(bottom=0, top=4.5E-2)
-        plt.ylim(bottom=0)
-        # plt.xlim( - 100, S[sites[int(id)]].sample_year)
-        plt.xlabel("Age (yr)")
-        plt.ylabel("Age distribution G(yr-1)")
-        plt.legend()
+        P.plotGAD(cod - 10)
+        P.plotGAD(63)
+        P.plotGAD(cod)
+        P.plotGAD(78)
+        P.plotGAD(cod + 10)
 
 
 
-        plt.show()
+        # plt.show()
 
 
         

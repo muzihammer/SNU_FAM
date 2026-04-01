@@ -1,12 +1,13 @@
 import numpy as np
 #################################Model Parameters#######################
 dz = 0.5 #m 간격 default : 0.5
-Z = 200 #m 몇 m 깊이까지?
+# Z = 200 #m 몇 m 깊이까지?
 
-dt = 0.01 #년 간격 default : 0.01
-Time = 200 #simulation 기간
+dt = 0.1 #년 간격 default : 0.01
+Time = 300 #simulation 기간
 
-year_to_sec = 365.2422 * 86400
+# year_to_sec = 365.2422 * 86400
+year_to_sec = 365.25 * 86400
 C_to_K = 273.15
 hPa_to_Pa = 1E2
 kg_to_g = 1E3
