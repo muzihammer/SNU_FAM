@@ -7,13 +7,15 @@ import matplotlib.pyplot as plt
 
 class Profile:
     
-    def __init__(self, z, site, gas):
-        self.z = z
-        self.N = z.shape[0]
-        self.T = C.Time
-        self.Nt = int((C.Time + (C.dt / 100)) / C.dt)
+    def __init__(self, site, gas):
+        self.z = np.arange(0.0, self.S.Z + C.dz / 2, C.dz)
+        self.Nz = self.z.shape[0]
 
+        self.T = C.Time
         self.t = np.arange(0.0, C.Time + C.dt / 2, C.dt)
+        # self.Nt = int((C.Time + (C.dt / 100)) / C.dt)
+        self.Nt = self.t.shape[0]
+
 
         self.S = site
         self.G = gas
@@ -22,72 +24,66 @@ class Profile:
         # self.D_CO2_0 = 1.39E-5 * (self.S.T/C.C_to_K) ** 1.75 * (C.P0 / self.S.p_0)
         self.D_CO2_0 = 5.75E-10 * self.S.T ** 1.81 * (C.P0 / self.S.p_0)
         # self.D_CO2_0 = 1.638946715E-05  # Buizert's MATLAB code
-        self.D_X_0 = gas.gamma_X * self.D_CO2_0
+        self.D_X_0 = self.G.gamma_X * self.D_CO2_0
 
-        self.Delta_z = C.dz
-        self.Delta_t = C.dt * C.year_to_sec #년을 초로
+        # self.Delta_z = C.dz
+        # self.Delta_t = C.dt * C.year_to_sec #년을 초로
 
         #######Herron and Langway, 1980#########
-        self.rho = self._rho()
+        self.rho = self._init_rho()
 
         ##############Mitchell et al., 2015##############
-        # self.rho_COD = 1 / (1 - 1 / 75) / (1 / C.kg_to_g / self.S.rho_ice + 7.02E-7 * self.S.T - 4.5E-5) / C.kg_to_g 
-        # self.rho_COD = 75 / 74 / (1 / self.S.rho_ice + self.S.T * 6.95E-4 - 4.3E-2)
-        self.rho_COD_bar = 1 / (1 / self.S.rho_ice + 6.95E-4 * self.S.T - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        self.rho_COD_bar = self._init_rho_COD_bar()
+
+        self.s = self._init_s()
+        self.s_cl = self._init_s_cl()
+        self.s_op = self._init_s_op()
+        self.s_op_star = self._init_s_op_star()
+
+        self.COD_idx = self._init_COD_idx()
+        self.rho_COD = self._init_rho_COD()
+        self.z_COD = self._init_z_COD()
+
+        self.iez = self._init_iez()
+        self.rho_LID = self._init_rho_LID()
+        self.z_LID = self._init_z_LID()
+        self.Nz_gas = np.argmin(np.abs(self.z - (self.z_COD + 10)))
         
-        # self.COD_idx = np.argmin(np.abs(self.rho - self.rho_COD))
-        # self.rho_COD = self.rho[self.COD_idx]
-        # self.z_COD = self.z[self.COD_idx]
-
-
-        # self.rho_LID = self.rho_COD - 0.014                             #Blunier et al., 2000
-        # self.LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
-
-
-        self.s = self._s()
-        self.s_cl = self._s_cl()
-        self.s_op = self._s_op()
-        self.s_op_star = self._s_op_star()
-
-
-        self.COD_idx = np.argmax(self.s_cl)
-        self.rho_COD = self.rho[self.COD_idx]
-        self.z_COD = self.z[self.COD_idx]
-
-        self.M = np.argmin(np.abs(self.z - (self.z_COD + 10)))
-        
-        self.C_shape = (self.M + 1, self.Nt + 1)
+        self.C_op_shape = (self.Nz_gas, self.Nt)
+        self.C_cl_shape = (self.Nz, self.Nt)
         # self.M = np.argmin(np.abs(self.z - self.S.Z))
 
-        ################OSU Model########################
-        self.tau_inv_DZ = self._tau_inv_DZ()
-        self.tau_inv_LIZ = self._tau_inv_LIZ()
+        ################CIC Model######################## (From Buizert's code)
+        # s와 관계있게 설정해야 될듯. 일단은 constant
+        self.tau_inv_DZ = self._init_tau_inv_DZ()
+        self.tau_inv_LIZ = self._init_tau_inv_LIZ()
 
-        self.D_X = self._D_X()
-        self.D_eddy = self._D_eddy()
+        self.D_X = self._init_D_X()
+        self.D_eddy = self._init_D_eddy()
         print("rho_LID : ", self.rho_LID, " rho_COD : ", self.rho_COD)
         print("LID : ", self.z_LID, "m, COD : ", self.z_COD, "m")
 
         ##############Buizert et al., 2011##############
-        self.w_ice = self._w_ice()
-        self.p_cl = self._p_cl()
-        self.w_air = self._w_air()
-
-
-        self.phi_op = self._phi_op()
-        self.phi_cl = self._phi_cl()
-
+        self.w_ice = self._init_w_ice()
+        self.p_cl = self._init_p_cl()
+        self.w_air = self._init_w_air()
+        self.phi_op = self._init_phi_op()
+        self.phi_cl = self._init_phi_cl()
         ################CIC Model#########################
-        self.x_air = self._x_air()
+        self.x_air = self._init_x_air()
         print("x_air : ", self.x_air * 1E3, "ml/kg")
+        self.eta = self._init_eta()
+
         self.C_op = self._C_op()
-        self.eta = self._eta()
         self.C_cl, self.C_total = self._C_cl()
 
         # self.Gamma, self.Delta = self._Delta()
         # self.median, self.FWHM = self._FWHM()
 
-    def _rho(self):
+    # def run(self):
+
+
+    def _init_rho(self):
         if self.S.use_HL:
             #######Herron and Langway, 1980#########
             k_0 = 11 * np.exp(-10160 / C.R / self.S.T)
@@ -108,10 +104,13 @@ class Profile:
             rho = np.interp(self.z, rho[:, 0], rho[:, 1])
             return rho
 
-    def _s(self):
+    def _init_rho_COD_bar(self):
+        return 1 / (1 / self.S.rho_ice + 6.95E-4 * self.S.T - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+
+    def _init_s(self):
         return 1 - self.rho / self.S.rho_ice
 
-    def _s_cl(self):
+    def _init_s_cl(self):
         # z_before_COD = self.z[np.where(self.rho < self.rho_COD)]
         # z_after_COD = self.z[np.where(self.rho >= self.rho_COD)]
 
@@ -134,20 +133,71 @@ class Profile:
 
         return s_cl
         
-    def _s_op(self):
+    def _init_s_op(self):
         s_op = self.s - self.s_cl
         s_op[s_op < 1E-9] = 1E-9
         return s_op
     
-    def _s_op_star(self):
+    def _init_s_op_star(self):
         return self.s_op * np.exp(C.M_air * C.g * self.z / C.R / self.S.T)
         # return self.s_op * self.rho / self.rho_LID
+      
+    def _init_COD_idx(self):
+        return np.argmax(self.s_cl)
+
+    def _init_rho_COD(self):
+        # self.rho_COD = 1 / (1 - 1 / 75) / (1 / C.kg_to_g / self.S.rho_ice + 7.02E-7 * self.S.T - 4.5E-5) / C.kg_to_g 
+        # self.rho_COD = 75 / 74 / (1 / self.S.rho_ice + self.S.T * 6.95E-4 - 4.3E-2)
+        return self.rho[self.COD_idx]
     
-    def porosity(self):
-        return self.s, self.s_cl, self.s_op, self.rho
+    def _init_z_COD(self):
+        return self.z[self.COD_idx]
     
+    def _init_rho_LID(self):
+        return self.rho_COD - 0.01 #Kahel et al., 2021  #0.014    #Blunier et al., 2000
+
+    def _init_z_LID(self):
+        LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
+        return self.z[self.LID_idx]
+
+    def _init_iez(self):
+        iez = np.zeros(self.Nz)
+        for i in range(1, self.Nz):
+            iez[i] = np.trapz(self.rho[:i + 1], self.z[:i + 1])
+        iez /= self.S.rho_ice
+        return iez
+
+    def _init_tau_inv_DZ(self):
+        inv_tort = np.loadtxt(C.ROOT+"icecores\\"+self.S.name+"\\tortuosity_DZ.txt")
+        inv_tort = np.interp(self.z, inv_tort[:, 0], inv_tort[:, 1])
+        inv_tort[inv_tort > 1] = 1
+        return inv_tort
+
+    def _init_tau_inv_LIZ(self):
+        D_m = np.loadtxt(C.ROOT+"icecores\\"+self.S.name+"\\tortuosity_LIZ.txt")
+        D_m = np.interp(self.z, D_m[:, 0], D_m[:, 1])
+        return D_m
+
+    def _init_D_X(self):
+        D_X = self.D_X_0 * self.tau_inv_DZ
+        return D_X
     
-    def _w_ice(self):
+    def _init_D_eddy(self):
+        H = 4.5
+        if self.S.name == "NEEM_EU":
+            D_eddy_0 = 2.30453E-5
+        elif self.S.name == "NEEM_US":
+            D_eddy_0 = 2.426405E-5
+        else:
+            D_eddy_0 = 2.30453E-5
+        # D_eddy_0 = 1.6E-5
+        D_eddy = D_eddy_0 * np.exp(-self.z / H)
+        D_eddy[self.z >= 55] = 0
+        D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ)
+        return D_eddy
+
+    #수정해야될듯
+    def _init_w_ice(self):
         #########Buizert et al., 2011###########
         return self.S.A_ieq * self.S.rho_ice / self.rho
         #########Goujon et al., 2003###########
@@ -155,21 +205,17 @@ class Profile:
         # m = 10
         # return self.S.rho_ice / self.rho * (self.S.A_ieq - self.S.A_ieq * ((m + 2) / (m + 1) * zeta) * (1 - (zeta ** (m + 1)) / (m + 2)))
 
-    def _p_cl(self):
+    def _init_p_cl(self):
 
-        p_cl = np.zeros(self.N)
+        p_cl = np.zeros(self.Nz)
         # dz = self.z[1] - self.z[0] # dz (단일 값) 추출
         
         strain = np.gradient(np.log(self.w_ice), self.z)
 
-        # 1. 미분 및 상수 준비
-        # MATLAB의 dscl이 s_cl의 미분값이라면 np.gradient를 유지하되, 
-        # 만약 diff를 썼다면 np.diff 후 zero-padding이 필요할 수 있습니다.
-        # dscl = np.gradient(self.s_cl, self.z)
-        dscl = np.concatenate([[0], np.diff(self.s_cl) / C.dz])
+        dscl = np.gradient(self.s_cl, self.z)
+        # dscl = np.concatenate([[0], np.diff(self.s_cl) / C.dz])
         exp_term = np.exp(C.M_air * C.g * self.z / C.R / self.S.T)
 
-        # 2. COD 지점까지의 루프 (MATLAB의 teller1 = 1:teller_co)
         for i in range(self.COD_idx + 1):
             integral_num = []
             integral_den = []
@@ -205,7 +251,7 @@ class Profile:
 
         return p_cl
 
-    def _w_air(self):
+    def _init_w_air(self):
         # flux_COD = self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] / self.rho_COD
         # w_air_before_COD = self.S.A_ieq * self.S.rho_ice / (self.s_op_star[:self.COD_idx] + 1E-10) * (flux_COD + 1E-10 - self.s_cl[:self.COD_idx] * self.p_cl[:self.COD_idx] / self.rho[:self.COD_idx])
         
@@ -227,98 +273,22 @@ class Profile:
         # w_air_after_COD = self.w_ice[self.COD_idx:]
         return w_air
     
-    def velocity(self):
-        return self.w_air, self.w_ice, self.p_cl
-    
-    def _phi_op(self):
+    def _init_phi_op(self):
         return self.s_op_star * self.w_air
     
-    def _phi_cl(self):
+    def _init_phi_cl(self):
         return self.s_cl * self.p_cl * self.w_ice
 
-    ###########OSU Model##################
-    def _tau_inv_DZ(self):
-        inv_tort = np.loadtxt(C.ROOT+"icecores\\"+self.S.name+"\\tortuosity_DZ.txt")
-        inv_tort = np.interp(self.z, inv_tort[:, 0], inv_tort[:, 1])
-        inv_tort[inv_tort > 1] = 1
-        return inv_tort
-
-    def _tau_inv_LIZ(self):
-        D_m = np.loadtxt(C.ROOT+"icecores\\"+self.S.name+"\\tortuosity_LIZ.txt")
-        D_m = np.interp(self.z, D_m[:, 0], D_m[:, 1])
-        return D_m
-    
-    def tortuosity(self):
-        return self.tau_inv_DZ, self.tau_inv_LIZ
-
-    def _D_X(self):
-        
-        # if self.S.name :   #From Tortuosity data
-        # if self.S.name == "CPSW":
-        #     g1 = -0.209
-        #     g2 = 1.515
-        #     g3 = 0.53
-        #     g4 = 3.17E-10
-        #     g5 = 1.82
-        #     s_op = self.s_op#[:self.LID_idx + 1]
-        #     # s_op = self.s_op_star[:self.LID_idx + 1]
-        #     D_X_before_LID = self.D_X_0 * (g1 + g2 * s_op + g3 * s_op * s_op)
-        #     self.LID_idx = np.min(np.where(D_X_before_LID < 0))
-        #     D_X_before_LID = D_X_before_LID[:self.LID_idx]
-        #     # D_CH4_before_LID[D_CH4_before_LID < 0] = 0
-
-        #     self.rho_LID = self.rho[self.LID_idx]
-        #     self.z_LID = self.z[self.LID_idx]
-
-        #     D_X_after_LID = g4 + (D_X_before_LID[-1] - g4) * np.exp(-g5 * (self.z[self.LID_idx:] - self.z_LID))
-        #     return np.concatenate((D_X_before_LID, D_X_after_LID))
-        # else:
-        # D_X = self.s_op_star * self.D_X_0 * self.tau_inv_DZ   #이거 아닌가
-        D_X = self.D_X_0 * self.tau_inv_DZ
-        
-        self.rho_LID = self.rho_COD - 0.01 #0.014                             #Blunier et al., 2000
-        self.LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
-        self.z_LID = self.z[self.LID_idx]
-
-        return D_X
-    
-    def _D_eddy(self):
-        H = 4.5
-        if self.S.name == "NEEM_EU":
-            D_eddy_0 = 2.30453E-5
-        elif self.S.name == "NEEM_US":
-            D_eddy_0 = 2.426405E-5
-        else:
-            D_eddy_0 = 2.30453E-5
-        # D_eddy_0 = 1.6E-5
-        D_eddy = D_eddy_0 * np.exp(-self.z / H)
-        D_eddy[self.z >= 55] = 0
-        D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ)
-        return D_eddy
-        # if self.S.name in ["NEEM_EU", "NEEM_US"]:   #From LIZ data
-        #     D_eddy_0 = 2.30453E-5
-        #     # D_eddy_0 = 1.6E-5
-        #     D_eddy = D_eddy_0 * np.exp(-self.z / H)
-        #     D_eddy[self.z >= 55] = 0
-        #     D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ)
-        #     return D_eddy
-        # else:
-        #     g6 = 3.17E-9
-        #     g7 = 0.11
-        #     #########################SIO Model#####################################
-        #     D_eddy_before_LID = 1.6E-5 * np.exp(-self.z[:self.LID_idx + 1] / H)
-        #     #########################OSU Model#####################################
-        #     D_eddy_before_COD = g6 * np.exp(g7 * (self.z[self.LID_idx + 1:self.COD_idx + 1] - self.z_LID))
-        #     D_eddy_after_COD = np.zeros(self.N - self.COD_idx - 1)
-        #     return np.concatenate((D_eddy_before_LID, D_eddy_before_COD, D_eddy_after_COD))
-    
-    def diffusion(self):
-        return self.D_X, self.D_eddy, self.D_X + self.D_eddy, self.s_op_star
-    
     ##############CIC Model######################
-    def _x_air(self):
-        return self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * self.S.p_0 / C.P0 * C.C_to_K / self.S.T / self.rho[self.COD_idx]
+    def _init_x_air(self):
+        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.C_to_K) / (self.S.T * C.P0 * self.rho[self.COD_idx])
 
+    def _init_eta(self):
+        eta = np.zeros(self.Nz)
+        for i in range(0, self.Nz):
+            eta[i] = np.trapz(1 / self.w_ice[:i + 1], self.z[:i + 1])
+        return eta
+    
     def _C_op(self):
         Delta_M = self.G.M_X - C.M_air
 
@@ -395,11 +365,6 @@ class Profile:
         # plt.show()
         return C_op
     
-    def _eta(self):
-        eta = np.zeros(self.M + 1)
-        for i in range(0, self.M + 1):
-            eta[i] = np.trapz(1 / self.w_ice[:i], self.z[:i])
-        return eta
 
     def _C_cl(self):
         trapping_t = np.gradient(self.phi_cl, self.z) / self.w_ice
