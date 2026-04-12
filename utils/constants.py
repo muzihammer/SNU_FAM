@@ -10,7 +10,9 @@ Time = 300 #simulation 기간
 year_to_sec = 365.25 * 86400
 C_to_K = 273.15
 hPa_to_Pa = 1E2
+m_to_cm = 1E2
 kg_to_g = 1E3
+Mg_to_kg = 1E3
 #################################Constants##############################
 
 M_air = 28.96E-3
