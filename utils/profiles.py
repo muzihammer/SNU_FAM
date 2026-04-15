@@ -24,17 +24,14 @@ class Profile:
         # self.Nt = int((C.Time + (C.dt / 100)) / C.dt)
         self.Nt = self.t.shape[0]
 
-        # self.D_CO2_0 = 1.39E-5 * (self.S.T/C.C_to_K) ** 1.75 * (C.P0 / self.S.p_0)
-        self.D_CO2_0 = 5.75E-10 * self.S.T ** 1.81 * (C.P0 / self.S.p_0)
-        # self.D_CO2_0 = 1.638946715E-05  # Buizert's MATLAB code
-        self.D_X_0 = self.G.gamma_X * self.D_CO2_0
         
         #######Goujon et al., 2003#########
         self.T_surf = self._init_T_surf()   #[1xNt]
         self.T_basal = self._init_T_basal() #[1xNt]
         self.T = self._init_T()             #[NzX1]
 
-        self.rho_ice = self._init_rho_ice() 
+
+        self.rho_ice = self._init_rho_ice() #[Nzx1]
 
         self.A_ieq = self._init_A_ieq()     #[1xNt]
         self.A_weq = self._init_A_weq()     #[1x1], for H-L model
@@ -43,22 +40,28 @@ class Profile:
         self.p_atm = self._init_p_atm()     #[1xNt]
         self.p_op = self._init_p_op()       #[Nzx1]
 
+        self.C_atm = self._init_C_atm()
+
+        # self.plotBoundaryConditions()        
+        self.D_X_0 = self._init_D_X_0()     #[Nzx1]
+
         #######Herron and Langway, 1980#########
         self.rho = self._init_rho() #[Nzx1], Mg/m3
 
         ##############Mitchell et al., 2015##############
-        self.rho_COD_bar = self._init_rho_COD_bar()
+        self.rho_COD_bar = self._init_rho_COD_bar() #[1xNt]
 
         self.s = self._init_s()
         self.s_cl = self._init_s_cl()
 
-        self.COD_idx = self._init_COD_idx()
-        self.rho_COD = self._init_rho_COD()
-        self.z_COD = self._init_z_COD()
+        self.COD_idx, self.rho_COD, self.z_COD = self._init_COD()
+
+        self.M = np.argmin(np.abs(self.z - (self.z_COD + 10)))
 
         self.s_op, self.s_op_safe = self._init_s_op()
         self.s_op_star = self._init_s_op_star()
 
+        self.C_op, self.C_gas = self._init_C_op()
 
         self.iez = self._init_iez()
         self.rho_LID = self._init_rho_LID()
@@ -96,14 +99,77 @@ class Profile:
 
     def run(self):
         for i, t in tqdm(enumerate(self.t)):
-            T = self._update_T(i)
-            rho = self._update_rho(i)
-            p_op = self._update_p_op(i)                                        
+            T_next = self._update_T(i)
+            rho_next = self._update_rho(i)
+            p_op_next = self._update_p_op(i)
+            C_op, C_gas = self._update_C_op(i)
+            C_cl, C_total = self._update_C_cl(i)
 
-            self.T = T
-            self.rho = rho
-            self.p_op = p_op
+            rho_COD_bar_next = self._update_rho_COD_bar(i)
+            s_next = self._update_s(i, rho_next)
+            s_cl_next = self._update_s_cl(i, s_next, rho_COD_bar_next)
+            
+            COD_idx_next, rho_COD_next, z_COD_next = self._update_COD(rho_next, s_cl_next)
 
+            s_op_next, s_op_safe_next = self._update_s_op(s_next, s_cl_next, COD_idx_next)
+
+            p_cl_next = self._update_p_cl(i, rho_next)
+            
+
+
+            self.T = T_next
+            self.rho = rho_next
+            self.p_op = p_op_next
+            self.C_op = C_op
+            self.C_gas = C_gas
+
+
+    def _thomas_solve(self, a, b, c, d):
+        N = len(d)
+        c_ = c.copy()
+        d_ = d.copy()
+        b_ = b.copy()
+
+        for j in range(1, N):
+            m = a[j] / b_[j - 1]
+            b_[j] -= m * c_[j - 1]
+            d_[j] -= m * d_[j - 1]
+
+        x = np.empty(N)
+        x[-1] = d_[-1] / b_[-1]
+        for j in range(N - 2, -1, -1):
+            x[j] = (d_[j] - c_[j] * x[j + 1]) / b_[j]
+
+        return x
+ 
+    def _newton_raphson_solve(self, G, G_grad, next_rho, previous_rho):
+        """
+        Newton-Raphson 1회 sweep (위→아래 순차).
+
+        F(ρ)  = (ρ − ρ^n)/dt_sec + w(ρ)(ρ − ρ_{i-1})/dz_L − ρ_ice · G(D)
+        F'(ρ) = 1/dt_sec + w_ice·ρ_ice·ρ_{i-1}/(ρ²·dz_L) − dG/dD
+        """
+        dt_sec = C.dt * C.year_to_sec
+        rho_ice = self.rho_ice[t + 1]
+        w = self.w_ice / C.year_to_sec      # m/yr → m/s
+
+        for j in range(1, len(next_rho)):
+            rho_j = next_rho[j]
+            rho_j_upper = next_rho[j - 1]
+
+            w_j = w[j] * rho_ice / rho_j
+
+            F = (rho_j - previous_rho[j]) / dt_sec \
+                + w_j * (rho_j - rho_j_upper) / self.dz_L[j] \
+                - rho_ice * G[j]
+
+            F_prime = 1 / dt_sec \
+                + (w[j] * rho_ice * rho_j_upper) / (rho_j ** 2 * self.dz_L[j]) \
+                - G_grad[j]
+
+            next_rho[j] = rho_j - F / F_prime
+
+        return next_rho
 
     #Goujon et al., 2003
     def _update_T(self, t):
@@ -160,24 +226,6 @@ class Profile:
         [                   sub[3]   diag[3] ]   [ x[3] ]   [ rhs[3] ]
         """
         
-        def _thomas_solve(a, b, c, d):
-            N = len(d)
-            c_ = c.copy()
-            d_ = d.copy()
-            b_ = b.copy()
-
-            for j in range(1, N):
-                m = a[j] / b_[j - 1]
-                b_[j] -= m * c_[j - 1]
-                d_[j] -= m * d_[j - 1]
-
-            x = np.empty(N)
-            x[-1] = d_[-1] / b_[-1]
-            for j in range(N - 2, -1, -1):
-                x[j] = (d_[j] - c_[j] * x[j + 1]) / b_[j]
-
-            return x
-        
         dt_sec = C.dt * C.year_to_sec
 
         previous_T = self.T.copy()
@@ -228,7 +276,7 @@ class Profile:
         rhs[-1]  = T_basal
 
         # --- Thomas 알고리즘 ---
-        next_T = _thomas_solve(sub, diag, sup, rhs)
+        next_T = self._thomas_solve(sub, diag, sup, rhs)
 
         next_T[0] = self.T_surf[t + 1]
         next_T[-1] = self.T_basal[t + 1]
@@ -398,34 +446,6 @@ class Profile:
 
             return G
 
-        def _newton_raphson_solve(G, G_grad, next_rho, previous_rho):
-            """
-            Newton-Raphson 1회 sweep (위→아래 순차).
-
-            F(ρ)  = (ρ − ρ^n)/dt_sec + w(ρ)(ρ − ρ_{i-1})/dz_L − ρ_ice · G(D)
-            F'(ρ) = 1/dt_sec + w_ice·ρ_ice·ρ_{i-1}/(ρ²·dz_L) − dG/dD
-            """
-            dt_sec = C.dt * C.year_to_sec
-            rho_ice = self.rho_ice[t + 1]
-            w = self.w_ice / C.year_to_sec      # m/yr → m/s
-
-            for j in range(1, len(next_rho)):
-                rho_j = next_rho[j]
-                rho_j_upper = next_rho[j - 1]
-
-                w_j = w[j] * rho_ice / rho_j
-
-                F = (rho_j - previous_rho[j]) / dt_sec \
-                    + w_j * (rho_j - rho_j_upper) / self.dz_L[j] \
-                    - rho_ice * G[j]
-
-                F_prime = 1 / dt_sec \
-                    + (w[j] * rho_ice * rho_j_upper) / (rho_j ** 2 * self.dz_L[j]) \
-                    - G_grad[j]
-
-                next_rho[j] = rho_j - F / F_prime
-
-            return next_rho
         
         previous_T = self.T.copy()
         previous_rho = self.rho.copy()  #Mg/m3
@@ -452,7 +472,7 @@ class Profile:
         # --- Newton-Raphson 반복 (3회) ---
         next_rho = previous_rho.copy()
         for _ in range(3):
-            next_rho = _newton_raphson_solve(G, G_grad, next_rho, previous_rho)
+            next_rho = self._newton_raphson_solve(G, G_grad, next_rho, previous_rho)
 
         return next_rho
 
@@ -525,50 +545,12 @@ class Profile:
             k* = k * s_op
         """
         
-        def _thomas_solve(a, b, c, d):
-            """
-            삼중대각 연립방정식 풀이 (Thomas algorithm / TDMA).
-                a[i] x[i-1] + b[i] x[i] + c[i] x[i+1] = d[i]
-        
-            a[0], c[-1]은 사용되지 않음.
-        
-            Parameters
-            ----------
-            a : ndarray [N]  하삼각 (sub-diagonal)
-            b : ndarray [N]  대각 (diagonal)
-            c : ndarray [N]  상삼각 (super-diagonal)
-            d : ndarray [N]  우변 (RHS)
-        
-            Returns
-            -------
-            x : ndarray [N]  해
-            """
-            N = len(d)
-            # 복사 (원본 보존)
-            c_ = c.astype(float).copy()
-            d_ = d.astype(float).copy()
-            b_ = b.astype(float).copy()
-        
-            # Forward sweep
-            for i in range(1, N):
-                m = a[i] / b_[i - 1]
-                b_[i] -= m * c_[i - 1]
-                d_[i] -= m * d_[i - 1]
-        
-            # Back substitution
-            x = np.empty(N)
-            x[-1] = d_[-1] / b_[-1]
-            for i in range(N - 2, -1, -1):
-                x[i] = (d_[i] - c_[i] * x[i + 1]) / b_[i]
-        
-            return x
-
         # --- 시간 스텝 [초 단위] ---
         dt_sec = C.dt * C.year_to_sec   # yr → s
  
         # --- 물리 상수 ---
-        mu  = 1.81E-5        # Pa·s, 공기 동점성 (~-20°C 근방 근사)
- 
+        mu  = 1.81E-5        # Pa·s, 공기 점성 (~-20°C 근방 근사)
+        mu  = 1.74E-5
         # --- 연평균 기압 p_bar ---
         p_bar = np.mean(self.p_atm)     # Pa
  
@@ -617,10 +599,222 @@ class Profile:
         rhs[-1]  = 0.0
  
         # --- Thomas 알고리즘 (삼중대각 직접 풀이) ---
-        p_next = _thomas_solve(sub, diag, sup, rhs)
+        p_next = self._thomas_solve(sub, diag, sup, rhs)
  
         return p_next
     
+    def _update_C_op(self, t):
+        """
+        Buizert (2011), Chapter 5, Eq.(5.16)-(5.23) — 개방 공극 내 트레이서 수송
+        Crank-Nicolson implicit 방식으로 한 타임스텝 진행.
+ 
+        ================================================================
+        원본 PDE (논문 Eq. 5.16):
+        ================================================================
+ 
+            ∂C/∂t = α ∂²C/∂z² + β ∂C/∂z + γ C
+ 
+        여기서 (Eq. 5.17-5.20):
+            α   = D_X + D_eddy                                           [m²/s]
+            β   = -D_X(ΔM·g/RT) + D_eddy(M_air·g/RT)
+                  - w_air + (1/s*_op) d/dz[s*_op(D_X + D_eddy)]         [m/s]
+            γ   = -(ΔM·g/RT) · (1/s*_op) d/dz[s*_op · D_X] - λ_X      [1/s]
+ 
+        trapping rate θ는 γ 식에서 상쇄됨 (논문 Eq. 5.20 참조):
+            θ가 ∂C/∂t 식의 -θC 항으로 들어가지만,
+            γ의 d/dz[s*_op · w_air]/s*_op 항과 정확히 상쇄되어
+            γ에는 θ 항이 남지 않음.
+ 
+        ================================================================
+        Crank-Nicolson 이산화 (논문 Eq. 5.21-5.23):
+        ================================================================
+ 
+            α*_i = α_i Δt / (2Δz²)
+            β*_i = β_i Δt / (4Δz)
+            γ*_i = γ_i Δt / 2
+ 
+        A 행렬 (implicit, t+1 시점):
+            sub[i]  = -(α*_i - β*_i)
+            diag[i] = 1 + 2α*_i - γ*_i
+            sup[i]  = -(α*_i + β*_i)
+ 
+        B 행렬 (explicit, t 시점):
+            sub[i]  = (α*_i - β*_i)
+            diag[i] = 1 - 2α*_i + γ*_i
+            sup[i]  = (α*_i + β*_i)
+ 
+        풀이: A · C^{n+1} = B · C^n
+ 
+        ================================================================
+        경계조건 (논문 Eq. 5.27-5.28):
+        ================================================================
+            z=0 (표면)   : C = C_atm(t)             (Dirichlet)
+            z=M·Δz (하단): C_M - C_{M-1} = 0        (Neumann, zero-gradient)
+ 
+        ================================================================
+        물리 상태:
+        ================================================================
+        _update_T, _update_rho, _update_p_op 이후 갱신된 self.T, self.rho,
+        self.p_op를 사용하여 α, β, γ를 현재 타임스텝에 맞게 재계산.
+        (단, D_X, D_eddy, w_air, s_op는 init 시 계산된 값 그대로 사용.
+         완전한 동적 업데이트는 _update_rho/_update_p_op 연동 시 확장 가능.)
+        """
+        Delta_M = self.G.M_X - C.M_air
+        Delta_t = C.dt * C.year_to_sec   # yr → s
+        Delta_z = C.dz
+ 
+        # --- 계수 α, β, γ (논문 Eq. 5.17-5.20) ---
+        alpha = self.D_X + self.D_eddy                           # [m²/s]
+ 
+        _beta = (1.0 / self.s_op_star
+                 * np.gradient(self.s_op_star * (self.D_X + self.D_eddy), self.z))
+        _beta[self.COD_idx] = _beta[self.COD_idx + 1]           # COD 특이점 보정
+ 
+        beta = (-self.D_X * (Delta_M * C.g) / (C.R * self.T)
+                + self.D_eddy * (C.M_air * C.g) / (C.R * self.T)
+                - self.w_air / C.year_to_sec                     # m/yr → m/s
+                + _beta)                                          # [m/s]
+ 
+        _gamma = (1.0 / self.s_op_star
+                  * np.gradient(self.s_op_star * self.D_X, self.z))
+        _gamma[self.COD_idx] = _gamma[self.COD_idx + 1]
+ 
+        gamma = (-Delta_M * C.g / C.R / self.T * _gamma
+                 - self.G.lambda_X)                               # [1/s]
+ 
+        # --- 무차원 Crank-Nicolson 계수 (논문 Eq. 5.22) ---
+        alpha_i_star = alpha * Delta_t / (2.0 * Delta_z ** 2)
+        beta_i_star  = beta  * Delta_t / (4.0 * Delta_z)
+        gamma_i_star = gamma * Delta_t / 2.0
+ 
+        M = self.M   # 유효 깊이 인덱스 상한
+ 
+        # --- A 행렬 (암시적, t+1 시점) (논문 Eq. 5.23, 5.25) ---
+        diag_A = 1.0 + 2.0 * alpha_i_star - gamma_i_star
+        sub_A  = -(alpha_i_star - beta_i_star)
+        sup_A  = -(alpha_i_star + beta_i_star)
+ 
+        # BC: 표면 Dirichlet (Eq. 5.27) — diag=1, sup=0
+        sub_A[0]  = 0.0
+        diag_A[0] = 1.0
+        sup_A[0]  = 0.0
+        # BC: 하단 Neumann zero-gradient (Eq. 5.28) — sub=-1, diag=1
+        sub_A[M]  = -1.0
+        diag_A[M] =  1.0
+        sup_A[M]  =  0.0
+ 
+        # --- rhs = B · C^n 직접 계산 (행렬 생성 없이) ---
+        # B의 대각 벡터: sub_B, diag_B, sup_B
+        diag_B = 1.0 - 2.0 * alpha_i_star + gamma_i_star
+        sub_B  = alpha_i_star - beta_i_star
+        sup_B  = alpha_i_star + beta_i_star
+ 
+        C_prev = self.C_gas.copy()
+ 
+        rhs = np.empty(M + 1)
+        rhs[0]   = diag_B[0] * C_prev[0] + sup_B[0] * C_prev[1]
+        rhs[1:M] = (sub_B[1:M]  * C_prev[:M - 1]
+                  + diag_B[1:M] * C_prev[1:M]
+                  + sup_B[1:M]  * C_prev[2:M + 1])
+        rhs[M]   = sub_B[M] * C_prev[M - 1] + diag_B[M] * C_prev[M]
+ 
+        # BC 우변 적용
+        C_atm_next = self.C_atm[t + 1]   # 표면 대기 경계조건 (Eq. 5.27)
+        rhs[0] = C_atm_next
+        rhs[M] = 0.0                    # Neumann BC (Eq. 5.28)
+ 
+        # --- Thomas 알고리즘으로 A · C^{n+1} = rhs 풀기 ---
+        C_gas = self._thomas_solve(sub_A, diag_A, sup_A, rhs)
+        C_gas[0] = C_atm_next          # Dirichlet 표면 경계 재확인
+ 
+        C_op = C_gas.copy()
+        C_op[self.COD_idx:] = 0.0    # COD 이하 개방공극 농도 = 0
+ 
+        return C_op, C_gas
+
+    def _update_rho_COD_bar(self, t):
+        return 1 / (1 / self.rho_ice[t + 1] + 6.95E-4 * self.T_surf[t + 1] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+
+    def _update_s(self, t, rho):
+        return 1 - rho / self.rho_ice[t + 1]
+
+    def _update_s_cl(self, t, s, rho_COD_bar):
+        #################Goujon et al., 2003###############################
+        s_co_bar = 1 - rho_COD_bar / self.rho_ice[t + 1]
+        s_cl = 0.37 * s * np.power(s / s_co_bar, -7.6)
+        s_cl[s_cl > s] = s[s_cl > s]
+
+        return s_cl
+
+    def _update_COD(self, rho, s_cl):
+        COD_idx = np.argmax(s_cl)
+        # self.rho_COD = 1 / (1 - 1 / 75) / (1 / C.kg_to_g / self.S.rho_ice + 7.02E-7 * self.S.T - 4.5E-5) / C.kg_to_g 
+        # self.rho_COD = 75 / 74 / (1 / self.S.rho_ice + self.S.T * 6.95E-4 - 4.3E-2)
+        rho_COD = rho[COD_idx]
+        z_COD = self.z[COD_idx]
+        return COD_idx, rho_COD, z_COD
+
+    def _update_s_op(self, s, s_cl, COD_idx):
+        s_op = s - s_cl
+        s_op[COD_idx:] = 0.0
+        s_op_safe = s_op + 1E-9
+        return s_op, s_op_safe
+
+    def _update_p_cl(self, T, rho, s_cl):
+        dt_sec = C.dt * C.year_to_sec
+
+        # --- parcel의 이전 위치 ---
+        z_prev = self.z - self.w_ice / C.year_to_sec * dt_sec
+
+        # --- T_ratio ---
+        T_prev  = np.interp(z_prev, self.z, self.T, left=self.T[0])
+        T_ratio = (T + C.C_to_K) / (T_prev + C.C_to_K)
+
+        # --- eff_strain ---
+        rho_prev   = np.interp(z_prev, self.z, self.rho, left=self.rho[0])
+        eff_strain = -(rho - rho_prev) / rho_prev
+
+        # --- ξ ---
+        zeta = T_ratio / (1.0 + eff_strain)
+        zeta = np.maximum(zeta, 1.0)
+
+        # --- p_cl_adv: z_prev < 0이면 p_op[0] (표면 대기압) ---
+        p_cl_prev = np.interp(z_prev, self.z, self.p_cl, left=self.p_op[0])
+
+        # --- s_cl_prev: z_prev < 0이면 0 (표면에서 closed porosity 없음) ---
+        s_cl_prev = np.interp(z_prev, self.z, self.s_cl, left=0.0)
+
+        # --- 신규 트래핑 ---
+        ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
+
+        # --- p_cl 업데이트 ---
+        num = p_cl_prev * zeta * s_cl_prev + self.p_op * ds_cl_new
+        den = s_cl + 1E-30
+
+        p_cl_new = num / den
+
+        # 물리 제약
+        p_cl_new = np.maximum(p_cl_new, self.p_op)
+
+        return p_cl_new
+
+
+    def _update_C_cl(self):
+        # 포획율 θ = -(1/s*_op) · d(s*_op · w_air)/dz  (Buizert Eq. 5.8)
+        theta = -np.gradient(self.s_op_star * self.w_air, self.z) / self.s_op_star
+        theta = np.maximum(theta, 0.0)
+
+        dt_sec = C.dt * C.year_to_sec
+
+        # closed 공극 농도: 기존 C_cl에 포획 기여분을 weighted average로 업데이트
+        # dC_cl/dt = θ · (C_gas - C_cl)  (열린 공극에서 닫힌 공극으로 유입)
+        C_cl = (self.C_cl + theta * dt_sec * self.C_gas) / (1 + theta * dt_sec)
+
+        full_air  = self.s_op_star + self.s_cl * self.p_cl
+        C_total   = (C_cl * self.s_cl * self.p_cl + self.C_gas * self.s_op_star) / (full_air + 1E-30)
+
+        return C_cl, C_total
+
     def _init_T_surf(self):
         T_surf = np.interp(self.t, self.S.T_surf[:, 0], self.S.T_surf[:, 1])
         return T_surf
@@ -650,6 +844,15 @@ class Profile:
         p_atm = np.interp(self.t, self.S.p_atm[:, 0], self.S.p_atm[:, 1])
         return p_atm
 
+    def _init_C_atm(self):
+        C_atm = np.interp(self.t, self.S.C_atm[:, 0], self.S.C_atm[:, 1])
+        return C_atm
+
+    def _init_C_op(self):
+        C_op = self.C_atm[0] * np.ones(self.M + 1)
+        C_gas = C_op.copy()
+        C_op[self.COD_idx:] = 0.0
+        return C_op, C_gas
     #Buizert et al., 2016
     def _init_p_op(self):
         p_op = self.p_atm[0] * np.exp((C.M_air * C.g * self.z) / (C.R * self.T[0]))
@@ -677,10 +880,17 @@ class Profile:
             return rho
 
     def _init_rho_COD_bar(self):
-        return 1 / (1 / self.S.rho_ice + 6.95E-4 * self.S.T - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * self.T_surf[0] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+
+    def _init_D_X_0(self):
+        # self.D_CO2_0 = 1.39E-5 * (self.S.T/C.C_to_K) ** 1.75 * (C.P0 / self.S.p_0)
+        D_CO2_0 = 5.75E-10 * self.T ** 1.81 * (C.P0 / self.p_op)
+        # self.D_CO2_0 = 1.638946715E-05  # Buizert's MATLAB code
+        D_X_0 = self.G.gamma_X * D_CO2_0
+        return D_X_0
 
     def _init_s(self):
-        return 1 - self.rho / self.S.rho_ice
+        return 1 - self.rho / self.rho_ice[0]
 
     def _init_s_cl(self):
         # z_before_COD = self.z[np.where(self.rho < self.rho_COD)]
@@ -699,7 +909,7 @@ class Profile:
         # return np.concatenate((s_cl_before_COD, s_cl_after_COD))
 
         #################Goujon et al., 2003###############################
-        s_co_bar = 1 - self.rho_COD_bar / self.S.rho_ice
+        s_co_bar = 1 - self.rho_COD_bar / self.rho_ice[0]
         s_cl = 0.37 * self.s * np.power(self.s / s_co_bar, -7.6)
         s_cl[s_cl > self.s] = self.s[s_cl > self.s]
 
@@ -712,19 +922,16 @@ class Profile:
         return s_op, s_op_safe
     
     def _init_s_op_star(self):
-        return self.s_op * np.exp(C.M_air * C.g * self.z / C.R / self.S.T)
+        return self.s_op_safe * self.p_op / C.P0
         # return self.s_op * self.rho / self.rho_LID
       
-    def _init_COD_idx(self):
-        return np.argmax(self.s_cl)
-
-    def _init_rho_COD(self):
+    def _init_COD(self):
+        COD_idx = np.argmax(self.s_cl)
         # self.rho_COD = 1 / (1 - 1 / 75) / (1 / C.kg_to_g / self.S.rho_ice + 7.02E-7 * self.S.T - 4.5E-5) / C.kg_to_g 
         # self.rho_COD = 75 / 74 / (1 / self.S.rho_ice + self.S.T * 6.95E-4 - 4.3E-2)
-        return self.rho[self.COD_idx]
-    
-    def _init_z_COD(self):
-        return self.z[self.COD_idx]
+        rho_COD = self.rho[COD_idx]
+        z_COD = self.z[COD_idx]
+        return COD_idx, rho_COD, z_COD
     
     def _init_rho_LID(self):
         return self.rho_COD - 0.01 #Kahel et al., 2021  #0.014    #Blunier et al., 2000
@@ -819,7 +1026,7 @@ class Profile:
             p_cl[i] = p_cl_z_COD * ratio_s / ratio_v
 
         # 예외 처리 및 초기값
-        p_cl[0] = 1
+        p_cl[0] = self.p_op[0]
         p_cl[p_cl < 1] = 1
 
         return p_cl
@@ -829,13 +1036,6 @@ class Profile:
         # w_air_before_COD = self.S.A_ieq * self.S.rho_ice / (self.s_op_star[:self.COD_idx] + 1E-10) * (flux_COD + 1E-10 - self.s_cl[:self.COD_idx] * self.p_cl[:self.COD_idx] / self.rho[:self.COD_idx])
         
         flux_COD = self.w_ice[self.COD_idx+1] * self.s_cl[self.COD_idx+1] * self.p_cl[self.COD_idx+1]
-        # w_air_before_COD = 1 / (self.s_op_star[:self.COD_idx] + 1E-10) * (flux_COD + 1E-10 - self.w_ice[:self.COD_idx] * self.s_cl[:self.COD_idx] * self.p_cl[:self.COD_idx])
-        # flux = self.w_ice * self.p_cl * self.s_cl
-        # plt.scatter(self.z, self.w_ice, marker='.', c='r', s=1)
-        # plt.scatter(self.z, self.p_cl, marker='.', c='b', s=1)
-        # plt.scatter(self.z, self.s_cl, marker='.', c='g', s=1)
-        # plt.scatter(self.z, flux, marker='.', s=1)
-        # plt.show()
         w_air = (flux_COD + 1E-10 - self.w_ice * self.p_cl * self.s_cl) / (self.s_op_star + 1E-10)
         w_air = np.minimum(self.w_ice, w_air)
         w_air[self.COD_idx:] = self.w_ice[self.COD_idx:]
@@ -861,79 +1061,6 @@ class Profile:
         for i in range(0, self.Nz):
             eta[i] = np.trapz(1 / self.w_ice[:i + 1], self.z[:i + 1])
         return eta
-    
-    def _init_C_op(self):
-        Delta_M = self.G.M_X - C.M_air
-        Delta_t = C.dt * C.year_to_sec
-        Delta_z = C.dz
-
-        alpha = self.D_X + self.D_eddy
-        _beta = 1 / self.s_op_star * np.gradient(self.s_op_star * (self.D_X + self.D_eddy), self.z)
-        _beta[self.COD_idx] = _beta[self.COD_idx + 1]
-        beta = -self.D_X * (Delta_M * C.g) / (C.R * self.S.T) + self.D_eddy * (C.M_air * C.g) / (C.R * self.S.T) - (self.w_air) / (C.year_to_sec) + _beta
-        _gamma = 1 / self.s_op_star * np.gradient(self.s_op_star * self.D_X, self.z)
-        _gamma[self.COD_idx] = _gamma[self.COD_idx + 1]
-        gamma = -Delta_M * C.g / C.R / self.S.T * _gamma - self.G.lambda_X
-
-        alpha_i_star = alpha * Delta_t / (2 * Delta_z * Delta_z)
-        beta_i_star = beta * Delta_t / (4 * Delta_z)
-        gamma_i_star = gamma * Delta_t / 2
-
-
-        A = np.zeros((self.M + 1, self.M + 1))
-        for i in range(self.M + 1):
-            for j in range(i - 1, i + 2):
-                if j == -1 or j == self.M + 1:
-                    continue
-                if j == i - 1:
-                    A[i,j] = -(alpha_i_star[i] - beta_i_star[i])
-                elif j == i:
-                    A[i,j] = 1 + 2 * alpha_i_star[i] - gamma_i_star[i]
-                elif j == i + 1:
-                    A[i,j] = -(alpha_i_star[i] + beta_i_star[i])
-        A[0,0] = 1
-        A[0,1] = 0
-        A[self.M,self.M-1] = -1
-        A[self.M,self.M] = 1
-
-
-        A_inv = np.linalg.pinv(A)
-
-        B = np.zeros((self.M + 1, self.M + 1))
-        for i in range(self.M + 1):
-            for j in range(i - 1, i + 2):
-                if j == -1 or j == self.M + 1:
-                    continue
-                if j == i - 1:
-                    B[i,j] = alpha_i_star[i] - beta_i_star[i]
-                elif j == i:
-                    B[i,j] = 1 - 2 * alpha_i_star[i] + gamma_i_star[i]
-                elif j == i + 1:
-                    B[i,j] = alpha_i_star[i] + beta_i_star[i]
-
-        C_atm = np.zeros(self.Nt + 1)
-        C_atm[(0.2 - 1E-9 <= self.t) & (self.t < 0.4 - 1E-9)] = 1 / (0.4 - 0.2)
-        C_op = np.zeros(self.C_shape)
-
-        C_op[:, 0] = C_atm[0]
-        BC_n = np.zeros(self.M + 1)
-        for t in tqdm(range(self.Nt)):
-            C_prev = C_op[:self.M + 1, t]
-            BC_n = B @ C_prev
-            
-            BC_n[0] = C_atm[t]
-            BC_n[self.M] = 0
-            
-            C_next = A_inv @ BC_n
-            C_next[0] = C_atm[t + 1]
-            # C_next[C_next < 0] = 0
-            C_op[:self.M + 1, t + 1] = C_next.flatten()
-            C_op[self.M + 1:, t + 1] = C_op[self.M, t + 1]
-
-        C_gas = C_op.copy()
-        C_op[self.COD_idx:, :] = 0.0
-        # C_op_test = np.sum(C_op, axis = 1)
-        return C_op, C_gas
     
     def _init_C_cl(self):
         trapping_t = np.gradient(self.phi_cl, self.z) / self.w_ice
@@ -1071,3 +1198,14 @@ class Profile:
         plt.ylabel("Depth [m]")
         plt.show()
 
+    def plotBoundaryConditions(self):
+        plt.plot(self.t, self.T_surf)
+        plt.show()
+        plt.plot(self.t, self.T_basal)
+        plt.show()
+        plt.plot(self.t, self.A_ieq)
+        plt.show()
+        plt.plot(self.t, self.p_atm)
+        plt.show()
+        plt.plot(self.t, self.C_atm)
+        plt.show()

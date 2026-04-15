@@ -4,7 +4,7 @@ dz = 0.5 #m 간격 default : 0.5
 # Z = 200 #m 몇 m 깊이까지?
 
 dt = 0.1 #년 간격 default : 0.01
-Time = 300 #simulation 기간
+Time = 100 #simulation 기간
 
 # year_to_sec = 365.2422 * 86400
 year_to_sec = 365.25 * 86400
@@ -31,4 +31,4 @@ P0 = 101325 #Pa
 
 # g = g_e * (1 + k * np.sin(phi)**2) / np.sqrt(1 - e2 * np.sin(phi)**2)
 ########################파일 경로#########################################
-ROOT = "E:\\LICP\\code\\CIC\\data\\"
+ROOT = "E:\\LICP\\code\\SNU\\data\\"

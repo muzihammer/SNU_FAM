@@ -14,9 +14,6 @@ class Interface:
         self.sites = list()
         for i, site in df_sites.iterrows():
             self.sites.append(Site(site["Site"], 
-                                   site["T[C]"], 
-                                   site["A[m ieq]"], 
-                                   site["p[hPa]"], 
                                    site["H[m]"], 
                                    site["Z[m]"], 
                                    site["Year"], 
@@ -39,6 +36,8 @@ class Interface:
         id_1 = int(input(query_1)) - 1
         site = self.sites[id_1]
 
+        site.read()
+
         query_2 = "기준 기체를 선택하라냥 =^._.^= ∫\n"
         for i, data in enumerate(self.gases):
             query_2 += str(i + 1) + ". " + data.name + "\n"
@@ -46,13 +45,7 @@ class Interface:
         id_2 = int(input(query_2)) - 1
         gas = self.gases[id_2]
 
-
-
-        z = np.arange(0, site.Z, C.dz)
-        t = np.arange(0, C.Time + C.dt, C.dt)
-        t = site.sample_year - t
-        
-        P = Profile(z, site, gas)
+        P = Profile(site, gas)
 
         s, s_cl, s_op, rho = P.porosity()
         w_air, w_ice, p = P.velocity()
