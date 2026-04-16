@@ -1,6 +1,6 @@
 import numpy as np
 #################################Model Parameters#######################
-dz = 0.5 #m 간격 default : 0.5
+dz = 0.1 #m 간격 default : 0.5
 # Z = 200 #m 몇 m 깊이까지?
 
 dt = 0.1 #년 간격 default : 0.01

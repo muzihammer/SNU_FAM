@@ -46,6 +46,7 @@ class Interface:
         gas = self.gases[id_2]
 
         P = Profile(site, gas)
+        P.run()
 
         s, s_cl, s_op, rho = P.porosity()
         w_air, w_ice, p = P.velocity()

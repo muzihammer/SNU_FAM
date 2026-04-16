@@ -6,6 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.interpolate import CubicHermiteSpline
 
+PLOT_INTERVAL = 1
+
 class Profile:
     
     def __init__(self, site, gas):
@@ -58,8 +60,7 @@ class Profile:
 
         self.M = np.argmin(np.abs(self.z - (self.z_COD + 10)))
 
-        self.s_op, self.s_op_safe = self._init_s_op()
-        self.s_op_star = self._init_s_op_star()
+        self.s_op, self.s_op_safe, self.s_op_star = self._init_s_op()
 
         self.C_op, self.C_gas = self._init_C_op()
 
@@ -67,7 +68,6 @@ class Profile:
         self.rho_LID = self._init_rho_LID()
         self.z_LID = self._init_z_LID()
 
-        self.Nz_gas = np.argmin(np.abs(self.z - (self.z_COD + 10)))
         self.C_shape = (self.Nz, self.Nt)
         # self.M = np.argmin(np.abs(self.z - self.S.Z))
 
@@ -98,31 +98,51 @@ class Profile:
         # self.median, self.FWHM = self._FWHM()
 
     def run(self):
+
+        self.plot_state(title=f"Init (t = {self.t[0]:.1f} yr)")
+        plt.ion()
+
         for i, t in tqdm(enumerate(self.t)):
             T_next = self._update_T(i)
             rho_next = self._update_rho(i)
             p_op_next = self._update_p_op(i)
-            C_op, C_gas = self._update_C_op(i)
-            C_cl, C_total = self._update_C_cl(i)
 
             rho_COD_bar_next = self._update_rho_COD_bar(i)
             s_next = self._update_s(i, rho_next)
             s_cl_next = self._update_s_cl(i, s_next, rho_COD_bar_next)
-            
             COD_idx_next, rho_COD_next, z_COD_next = self._update_COD(rho_next, s_cl_next)
 
-            s_op_next, s_op_safe_next = self._update_s_op(s_next, s_cl_next, COD_idx_next)
+            C_op_next, C_gas_next = self._update_C_op(i, COD_idx_next)
 
-            p_cl_next = self._update_p_cl(i, rho_next)
-            
+            s_op_next, s_op_safe_next, s_op_star_next = self._update_s_op(p_op_next, s_next, s_cl_next, COD_idx_next)
 
+            iez_next = self._update_iez(i, rho_next)
+            w_ice_next = self._update_w_ice(i, rho_next, iez_next)
+
+            p_cl_next = self._update_p_cl(i, T_next, rho_next, p_op_next, w_ice_next, s_cl_next)
+
+            C_cl_next, C_total_next = self._update_C_cl(i, C_gas_next, w_ice_next, s_cl_next, p_op_next, p_cl_next, s_op_star_next)
+
+            phi_cl_next = self._update_phi_cl(s_cl_next, p_cl_next, w_ice_next)
+            w_air_next = self._update_w_air(w_ice_next, s_cl_next, p_cl_next, s_op_star_next, COD_idx_next)
+
+            phi_op_next = self._update_phi_op(s_op_star_next, w_air_next)
 
             self.T = T_next
             self.rho = rho_next
-            self.p_op = p_op_next
-            self.C_op = C_op
-            self.C_gas = C_gas
+            self.p_op, self.p_cl = p_op_next, p_cl_next
+            self.C_op, self.C_gas = C_op_next, C_gas_next
+            self.C_cl, self.C_total = C_cl_next, C_total_next
+            self.s, self.s_cl, self.s_op, self.s_op_safe, self.s_op_star = s_next, s_cl_next, s_op_next, s_op_safe_next, s_op_star_next
+            self.w_ice, self.w_air = w_ice_next, w_air_next
+            self.phi_op, self.phi_cl = phi_op_next, phi_cl_next
+            self.COD_idx, self.rho_COD_bar, self.rho_COD, self.z_COD = COD_idx_next, rho_COD_bar_next, rho_COD_next, z_COD_next
 
+            if i % PLOT_INTERVAL == 0:
+                self.plot_state(title=f"t = {self.t[i + 1]:.2f} yr")
+        
+        plt.ioff()
+        plt.show()
 
     def _thomas_solve(self, a, b, c, d):
         N = len(d)
@@ -142,7 +162,7 @@ class Profile:
 
         return x
  
-    def _newton_raphson_solve(self, G, G_grad, next_rho, previous_rho):
+    def _newton_raphson_solve(self, t, G, G_grad, next_rho, previous_rho):
         """
         Newton-Raphson 1회 sweep (위→아래 순차).
 
@@ -153,24 +173,55 @@ class Profile:
         rho_ice = self.rho_ice[t + 1]
         w = self.w_ice / C.year_to_sec      # m/yr → m/s
 
+        F_arr       = np.zeros(self.Nz)
+        F_prime_arr = np.zeros(self.Nz)
         for j in range(1, len(next_rho)):
             rho_j = next_rho[j]
             rho_j_upper = next_rho[j - 1]
 
-            w_j = w[j] * rho_ice / rho_j
+            # w_j = w[j] * rho_ice / rho_j
 
             F = (rho_j - previous_rho[j]) / dt_sec \
-                + w_j * (rho_j - rho_j_upper) / self.dz_L[j] \
+                + w[j] * (rho_j - rho_j_upper) / self.dz_L[j] \
                 - rho_ice * G[j]
 
             F_prime = 1 / dt_sec \
                 + (w[j] * rho_ice * rho_j_upper) / (rho_j ** 2 * self.dz_L[j]) \
                 - G_grad[j]
+            
 
+            F_arr[j]       = F
+            F_prime_arr[j] = F_prime
+
+            if np.abs(F_prime) < 1e-5:
+                continue
+            
             next_rho[j] = rho_j - F / F_prime
 
-        return next_rho
+        debug = True
+        if debug:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
+            axes[0].plot(F_arr, self.z, color='tab:blue')
+            axes[0].set_xlabel("F")
+            axes[0].set_ylabel("Depth [m]")
+            axes[0].set_ylim(self.z[-1], self.z[0])
+            axes[0].axhline(self.z_COD, color='k', linestyle='--', linewidth=0.8, label='COD')
+            axes[0].axvline(0, color='gray', linestyle='--', linewidth=0.8)
+            axes[0].grid(True, linestyle='--', alpha=0.5)
+            axes[0].legend(fontsize=6)
 
+            axes[1].plot(F_prime_arr, self.z, color='tab:orange')
+            axes[1].set_xlabel("F'")
+            axes[1].set_ylim(self.z[-1], self.z[0])
+            axes[1].axhline(self.z_COD, color='k', linestyle='--', linewidth=0.8)
+            axes[1].axvline(0, color='gray', linestyle='--', linewidth=0.8)
+            axes[1].grid(True, linestyle='--', alpha=0.5)
+
+            fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
+            plt.tight_layout()
+            plt.show(block=True)
+
+        return next_rho
     #Goujon et al., 2003
     def _update_T(self, t):
         """
@@ -357,94 +408,134 @@ class Profile:
             """
             G = np.zeros(D.shape[0])
             n = 3
-            Q = 60E3
+            Q = 6.0E4
             
-            # --- Stage 1: Snow, D < D_0 (Eq. A1) ---
-            m1 = D < D_0
-            G[m1] = gamma * (P[m1] / D[m1] ** 2) * (1 - (5 / 3) * D[m1])
-
-            # --- Stage 2: Firn, 0.6 ≤ D < 0.895 (Eq. A3–A9) ---
-            m2 = (0.6 <= D) & (D < 0.895)
-
+            # --- Stage 2 계수 (전체 배열) ---
             c_Z = 15.5
-            Z_0 = 110.2 * D_0 ** 3 - 148.594 * D_0 ** 2 + 87.6166 * D_0 - 17
-
-            l_prime = (D[m2] / D_0) ** (1 / 3)
+            Z_0 = 110.2 * D_0**3 - 148.594 * D_0**2 + 87.6166 * D_0 - 17
+            l_prime = (D / D_0) ** (1/3)
             Z = Z_0 + c_Z * (l_prime - 1)
-
             l_2prime = l_prime + (
-                4 * Z_0 * (l_prime - 1) ** 2 * (2 * l_prime + 1)
-                + c_Z * (l_prime - 1) ** 3 * (3 * l_prime + 1)
+                4 * Z_0 * (l_prime-1)**2 * (2*l_prime+1)
+                + c_Z * (l_prime-1)**3 * (3*l_prime+1)
             ) / (
-                12 * l_prime * (4 * l_prime - 2 * Z_0 * (l_prime - 1) - c_Z * (l_prime - 1) ** 2)
+                12 * l_prime * (4*l_prime - 2*Z_0*(l_prime-1) - c_Z*(l_prime-1)**2)
             )
-
-            a_contact = (np.pi / 3 / Z / l_prime ** 2) * (
-                3 * (l_2prime ** 2 - 1) * Z_0
-                + l_2prime ** 2 * c_Z * (2 * l_2prime - 3)
+            a_contact = (np.pi / 3 / Z / l_prime**2) * (
+                3 * (l_2prime**2 - 1) * Z_0
+                + l_2prime**2 * c_Z * (2*l_2prime - 3)
                 + c_Z
             )
+            A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T + C.C_to_K))
+            P_star  = 4 * np.pi * P / a_contact / Z / D
 
-            A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T[m2] + C.C_to_K))
-            P_star = 4 * np.pi * P[m2] / a_contact / Z / D[m2]
+            # --- Stage 1→2 전환 인덱스 ---
+            Dms  = D_0 + 0.009
+            ind1 = np.argmax(D >= Dms)
 
-            G[m2] = 5.3 * A_creep * (D[m2] ** 2 * D_0) ** (1 / 3) \
-                    * (a_contact / np.pi) ** (1 / 2) * (P_star / 3) ** n
+            # --- Stage 2 (ind1 이후) ---
+            G[ind1:] = (5.3 * A_creep[ind1:]
+                        * (D[ind1:]**2 * D_0)**(1/3)
+                        * (a_contact[ind1:] / np.pi)**0.5
+                        * (P_star[ind1:] / 3)**n)
+            
+            # --- gamma iteration (Stage 1) ---
+            G[:ind1] = gamma * (P[:ind1] / D[:ind1]**2) \
+                        * (1 - (5/3) * D[:ind1])
 
-            # --- 전환 구간: Stage 1 → 2 (D_0 ≤ D < 0.6) ---
-            m1_2 = (D_0 <= D) & (D < 0.6)
-            if np.any(m1) and np.any(m2) and np.any(m1_2):
-                hermite = CubicHermiteSpline(
-                    x=[D[m1][-1], D[m2][0]],
-                    y=[G[m1][-1], G[m2][0]],
-                    dydx=[np.gradient(G[m1], D[m1])[-1], np.gradient(G[m2], D[m2])[0]]
-                )
-                G[m1_2] = hermite(D[m1_2])
+            gfrac = 0.03
+            cc = 0
+            while G[ind1-1] < G[ind1]:
+                gamma *= (1 + gfrac)
+                G[:ind1] = gamma * (P[:ind1] / D[:ind1]**2) \
+                            * (1 - (5/3) * D[:ind1])
+                cc += 1
+                if cc > 10000:
+                    print('Goujon gamma 상향 미수렴')
+                    break
 
-            # --- Stage 3a: Bubbly ice, cylindrical, 0.905 ≤ D < 0.945 (Eq. A10) ---
-            m3 = (0.905 <= D) & (D < 0.945)
+            counter = 0
+            while G[ind1-1] >= G[ind1]:
+                gamma /= (1 + gfrac/2.0)
+                G[:ind1] = gamma * (P[:ind1] / D[:ind1]**2) \
+                            * (1 - (5/3) * D[:ind1])
+                counter += 1
+                if counter > 10000:
+                    print('Goujon gamma 하향 미수렴')
+                    break
 
-            A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T[m3] + C.C_to_K))
+            # gamma 확정 후 Stage 1 전체 재계산
+            G[:ind1] = gamma * (P[:ind1] / D[:ind1]**2) \
+                        * (1 - (5/3) * D[:ind1])
+            if ind1 > 0:
+                n_trans = 5
+                i_start = max(0, ind1 - n_trans)
+                G[i_start:ind1+1] = np.linspace(G[i_start], G[ind1], ind1 + 1 - i_start)
+
+            # --- Stage 3a (D > 0.9) ---
             P_atm = self.p_atm[t]
-            V_c = (6.95E-4 * (T_s + C.C_to_K) - 0.0043) / C.m_to_cm ** 3 * C.kg_to_g
-            D_c = 1 / (V_c * C.rho_ice * C.Mg_to_kg + 1)
-            P_b = P_atm * (D[m3] * (1 - D_c) / D_c / (1 - D[m3]))
-            P_eff = np.maximum(P[m3] + P_atm - P_b, 0.0)
+            V_c   = (6.95E-4 * (T_s + C.C_to_K) - 0.0043) / C.m_to_cm**3 * C.kg_to_g
+            D_c   = 1 / (V_c * self.rho_ice[t] * C.Mg_to_kg + 1)
+            P_b   = P_atm * (D * (1 - D_c) / D_c / (1 - D))
+            P_eff = np.maximum(P + P_atm - P_b, 0.0)
 
-            G[m3] = 2 * A_creep \
-                    * (D[m3] * (1 - D[m3]) / (1 - (1 - D[m3]) ** (1 / n)) ** n) \
-                    * (2 * P_eff / n) ** n
+            m3 = D > 0.9
+            G[m3] = (2 * A_creep[m3]
+                    * (D[m3]*(1-D[m3]) / (1-(1-D[m3])**(1/n))**n)
+                    * (2 * P_eff[m3] / n)**n)
 
-            # --- 전환 구간: Stage 2 → 3a (0.895 ≤ D < 0.905) ---
-            m2_3 = (0.895 <= D) & (D < 0.905)
-            if np.any(m2) and np.any(m3) and np.any(m2_3):
-                hermite = CubicHermiteSpline(
-                    x=[D[m2][-1], D[m3][0]],
-                    y=[G[m2][-1], G[m3][0]],
-                    dydx=[np.gradient(G[m2], D[m2])[-1], np.gradient(G[m3], D[m3])[0]]
-                )
-                G[m2_3] = hermite(D[m2_3])
+            # --- Stage 3b (D > 0.98) ---
+            A_creep_3b = 1.2E-3 * np.exp(-Q / C.R / (previous_T + C.C_to_K))
+            m4 = D > 0.98
+            G[m4] = (9/4) * A_creep_3b[m4] * (1 - D[m4]) * P_eff[m4]
 
-            # --- Stage 3b: Bubbly ice, spherical, 0.955 ≤ D < 1.0 (Eq. A13) ---
-            m4 = (0.955 <= D) & (D <= 1.0)
+            return G, gamma
+            """
+            # # --- Stage 3a: Bubbly ice, cylindrical, 0.905 ≤ D < 0.945 (Eq. A10) ---
+            # m3 = (0.905 <= D) & (D < 0.945)
 
-            A_creep = 1.2E-3 * np.exp(Q / C.R / previous_T[m4])
-            P_b = P_atm * (D[m4] * (1 - D_c) / D_c / (1 - D[m4]))
-            P_eff = np.maximum(P[m4] + P_atm - P_b, 0.0)
+            # A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T[m3] + C.C_to_K))
+            # P_atm = self.p_atm[t]
+            # V_c = (6.95E-4 * (T_s + C.C_to_K) - 0.0043) / C.m_to_cm ** 3 * C.kg_to_g
+            # D_c = 1 / (V_c * self.rho_ice[t] * C.Mg_to_kg + 1)
+            # P_b = P_atm * (D[m3] * (1 - D_c) / D_c / (1 - D[m3]))
+            # P_eff = np.maximum(P[m3] + P_atm - P_b, 0.0)
 
-            G[m4] = (9 / 4) * A_creep * (1 - D[m4]) * P_eff
+            # G[m3] = 2 * A_creep \
+            #         * (D[m3] * (1 - D[m3]) / (1 - (1 - D[m3]) ** (1 / n)) ** n) \
+            #         * (2 * P_eff / n) ** n
 
-            # --- 전환 구간: Stage 3a → 3b (0.945 ≤ D < 0.955) ---
-            m3_4 = (0.945 <= D) & (D < 0.955)
-            if np.any(m3) and np.any(m4) and np.any(m3_4):
-                hermite = CubicHermiteSpline(
-                    x=[D[m3][-1], D[m4][0]],
-                    y=[G[m3][-1], G[m4][0]],
-                    dydx=[np.gradient(G[m3], D[m3])[-1], np.gradient(G[m4], D[m4])[0]]
-                )
-                G[m3_4] = hermite(D[m3_4])
+            # # --- 전환 구간: Stage 2 → 3a (0.895 ≤ D < 0.905) ---
+            # m2_3 = (0.895 <= D) & (D < 0.905)
+            # if np.any(m2) and np.any(m3) and np.any(m2_3):
+            #     hermite = CubicHermiteSpline(
+            #         x=[D[m2][-1], D[m3][0]],
+            #         y=[G[m2][-1], G[m3][0]],
+            #         dydx=[np.gradient(G[m2], D[m2])[-1], np.gradient(G[m3], D[m3])[0]]
+            #     )
+            #     G[m2_3] = hermite(D[m2_3])
 
-            return G
+            # # --- Stage 3b: Bubbly ice, spherical, 0.955 ≤ D < 1.0 (Eq. A13) ---
+            # m4 = (0.955 <= D) & (D <= 1.0)
+
+            # A_creep = 1.2E-3 * np.exp(-Q / C.R / (previous_T[m4] + C.C_to_K))
+            # P_b = P_atm * (D[m4] * (1 - D_c) / D_c / (1 - D[m4]))
+            # P_eff = np.maximum(P[m4] + P_atm - P_b, 0.0)
+
+            # G[m4] = (9 / 4) * A_creep * (1 - D[m4]) * P_eff
+
+            # # --- 전환 구간: Stage 3a → 3b (0.945 ≤ D < 0.955) ---
+            # m3_4 = (0.945 <= D) & (D < 0.955)
+            # if np.any(m3) and np.any(m4) and np.any(m3_4):
+            #     hermite = CubicHermiteSpline(
+            #         x=[D[m3][-1], D[m4][0]],
+            #         y=[G[m3][-1], G[m4][0]],
+            #         dydx=[np.gradient(G[m3], D[m3])[-1], np.gradient(G[m4], D[m4])[0]]
+            #     )
+            #     G[m3_4] = hermite(D[m3_4])
+
+            # return G
+            """
 
         
         previous_T = self.T.copy()
@@ -462,17 +553,103 @@ class Profile:
         D_0 = min(0.00226 * T_s + 0.647, 0.59)
 
         # gamma = 1.60228E-9
-        # gamma = 0.5 / C.year_to_sec
-        gamma = 7.47E-13
+        gamma = 0.5 / C.year_to_sec
+        # gamma = 7.47E-13
 
-        G = D_dot(D, P, gamma, previous_T, D_0, T_s)
+        # G, gamma = D_dot(D, P, gamma, previous_T, D_0, T_s)
+
+        Dms  = D_0 + 0.009
+        ind1 = np.argmax(D >= Dms)
+
+        G, gamma = D_dot(D, P, gamma, previous_T, D_0, T_s)
         G_grad = np.gradient(G, D)
         G_grad[np.isnan(G_grad)] = 0.0
+
+        ##############################################################
+        fig, axes = plt.subplots(1, 4, figsize=(16, 6), sharey=True)
+
+        z_stage12 = self.z[ind1]
+        z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
+        z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
+
+        for ax, x, xlabel in zip(axes,
+                                [G,  G_grad,          D,                     P],
+                                ['G (dD/dt) [s⁻¹]', 'G_grad [s⁻¹/(-)]', 'D (relative density)', 'P (overburden) [Pa]']):
+            ax.plot(x, self.z, color='tab:blue')
+            ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
+            ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
+            ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
+            ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel('Depth [m]')
+            ax.set_ylim(self.z[-1], self.z[0])
+            ax.grid(True, linestyle='--', alpha=0.5)
+            ax.legend(fontsize=6)
+
+        fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
+        plt.show()
+        ##################################################################
+
+
+
+        # dt_sec  = C.dt * C.year_to_sec
+        # rho_ice = self.rho_ice[t + 1]
+        # w       = self.w_ice / C.year_to_sec
+
+        # alpha = 1.0 / dt_sec - G_grad          # (1/dt - G_grad)
+        # r_adv = w / self.dz_L                  # w/dz
+
+        # sub  = -r_adv                           # ρ_{i-1}^{n+1} 계수
+        # diag = alpha + r_adv                    # ρ_i^{n+1} 계수
+        # sup  = np.zeros(self.Nz)
+        # rhs  = alpha * previous_rho + rho_ice * G  # 우변
+
+        # # 표면 경계조건
+        # sub[0]  = 0.0
+        # diag[0] = 1.0
+        # sup[0]  = 0.0
+        # rhs[0]  = self.S.rho_0
+
+        # next_rho = self._thomas_solve(sub, diag, sup, rhs)
+        # return next_rho
+
+        # # G_grad = np.gradient(G, D)
+        # dG_dz = np.gradient(G, self.z)
+        # dD_dz = np.gradient(D, self.z)
+        # # dD_dz가 0에 가까운 곳(깊은 얼음) 방지
+        # G_grad = np.where(np.abs(dD_dz) > 1e-10, dG_dz / dD_dz, 0.0)
+        # G_grad[np.isnan(G_grad)] = 0.0
+
+        # ##############################################################
+        # fig, axes = plt.subplots(1, 4, figsize=(16, 6), sharey=True)
+
+        # z_stage12 = self.z[ind1]
+        # z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
+        # z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
+
+        # for ax, x, xlabel in zip(axes,
+        #                         [G,  G_grad,          D,                     P],
+        #                         ['G (dD/dt) [s⁻¹]', 'G_grad [s⁻¹/(-)]', 'D (relative density)', 'P (overburden) [Pa]']):
+        #     ax.plot(x, self.z, color='tab:blue')
+        #     ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
+        #     ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
+        #     ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
+        #     ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
+        #     ax.set_xlabel(xlabel)
+        #     ax.set_ylabel('Depth [m]')
+        #     ax.set_ylim(self.z[-1], self.z[0])
+        #     ax.grid(True, linestyle='--', alpha=0.5)
+        #     ax.legend(fontsize=6)
+
+        # fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
+        # plt.show()
+        # ##################################################################
+
         
         # --- Newton-Raphson 반복 (3회) ---
         next_rho = previous_rho.copy()
         for _ in range(3):
-            next_rho = self._newton_raphson_solve(G, G_grad, next_rho, previous_rho)
+            next_rho = self._newton_raphson_solve(t, G, G_grad, next_rho, previous_rho)
 
         return next_rho
 
@@ -603,7 +780,7 @@ class Profile:
  
         return p_next
     
-    def _update_C_op(self, t):
+    def _update_C_op(self, t, COD_idx):
         """
         Buizert (2011), Chapter 5, Eq.(5.16)-(5.23) — 개방 공극 내 트레이서 수송
         Crank-Nicolson implicit 방식으로 한 타임스텝 진행.
@@ -719,16 +896,15 @@ class Profile:
         rhs[M]   = sub_B[M] * C_prev[M - 1] + diag_B[M] * C_prev[M]
  
         # BC 우변 적용
-        C_atm_next = self.C_atm[t + 1]   # 표면 대기 경계조건 (Eq. 5.27)
-        rhs[0] = C_atm_next
+        rhs[0] = self.C_atm[t + 1]      # 표면 대기 경계조건 (Eq. 5.27)
         rhs[M] = 0.0                    # Neumann BC (Eq. 5.28)
  
         # --- Thomas 알고리즘으로 A · C^{n+1} = rhs 풀기 ---
         C_gas = self._thomas_solve(sub_A, diag_A, sup_A, rhs)
-        C_gas[0] = C_atm_next          # Dirichlet 표면 경계 재확인
+        C_gas[0] = self.C_atm[t + 1]          # Dirichlet 표면 경계 재확인
  
         C_op = C_gas.copy()
-        C_op[self.COD_idx:] = 0.0    # COD 이하 개방공극 농도 = 0
+        C_op[COD_idx:] = 0.0    # COD 이하 개방공극 농도 = 0
  
         return C_op, C_gas
 
@@ -754,24 +930,25 @@ class Profile:
         z_COD = self.z[COD_idx]
         return COD_idx, rho_COD, z_COD
 
-    def _update_s_op(self, s, s_cl, COD_idx):
+    def _update_s_op(self, p_op, s, s_cl, COD_idx):
         s_op = s - s_cl
         s_op[COD_idx:] = 0.0
         s_op_safe = s_op + 1E-9
-        return s_op, s_op_safe
+        s_op_star = s_op_safe * p_op / C.P0
+        return s_op, s_op_safe, s_op_star
 
-    def _update_p_cl(self, T, rho, s_cl):
+    def _update_p_cl(self, t, T, rho, p_op, w_ice, s_cl):
         dt_sec = C.dt * C.year_to_sec
 
         # --- parcel의 이전 위치 ---
-        z_prev = self.z - self.w_ice / C.year_to_sec * dt_sec
+        z_prev = self.z - w_ice / C.year_to_sec * dt_sec
 
         # --- T_ratio ---
-        T_prev  = np.interp(z_prev, self.z, self.T, left=self.T[0])
+        T_prev  = np.interp(z_prev, self.z, self.T, left=self.T_surf[t + 1])
         T_ratio = (T + C.C_to_K) / (T_prev + C.C_to_K)
 
         # --- eff_strain ---
-        rho_prev   = np.interp(z_prev, self.z, self.rho, left=self.rho[0])
+        rho_prev   = np.interp(z_prev, self.z, self.rho, left=self.S.rho_0)
         eff_strain = -(rho - rho_prev) / rho_prev
 
         # --- ξ ---
@@ -779,7 +956,7 @@ class Profile:
         zeta = np.maximum(zeta, 1.0)
 
         # --- p_cl_adv: z_prev < 0이면 p_op[0] (표면 대기압) ---
-        p_cl_prev = np.interp(z_prev, self.z, self.p_cl, left=self.p_op[0])
+        p_cl_prev = np.interp(z_prev, self.z, self.p_cl, left=self.p_atm[t + 1])
 
         # --- s_cl_prev: z_prev < 0이면 0 (표면에서 closed porosity 없음) ---
         s_cl_prev = np.interp(z_prev, self.z, self.s_cl, left=0.0)
@@ -788,30 +965,81 @@ class Profile:
         ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
 
         # --- p_cl 업데이트 ---
-        num = p_cl_prev * zeta * s_cl_prev + self.p_op * ds_cl_new
-        den = s_cl + 1E-30
+        num = p_cl_prev * zeta * s_cl_prev + p_op * ds_cl_new
+        den = s_cl_prev + ds_cl_new + 1E-30
 
-        p_cl_new = num / den
+        p_cl = num / den
 
         # 물리 제약
-        p_cl_new = np.maximum(p_cl_new, self.p_op)
+        p_cl = np.maximum(p_cl, p_op)
 
-        return p_cl_new
+        return p_cl
 
+    def _update_iez(self, t, rho):
+        iez = np.zeros(self.Nz)
+        for i in range(1, self.Nz):
+            iez[i] = np.trapz(rho[:i + 1], self.z[:i + 1])
+        iez /= self.rho_ice[t + 1]
+        return iez
 
-    def _update_C_cl(self):
-        # 포획율 θ = -(1/s*_op) · d(s*_op · w_air)/dz  (Buizert Eq. 5.8)
-        theta = -np.gradient(self.s_op_star * self.w_air, self.z) / self.s_op_star
-        theta = np.maximum(theta, 0.0)
+    def _update_w_ice(self, t, rho, iez):
+        # --- Nye model ---
+        # thinning: (1 - z_ice/H)
+        w_ice = self.A_ieq[t + 1] * (self.rho_ice[t + 1] / rho) * (1.0 - iez / self.S.H)
+        w_ice = np.maximum(w_ice, 0.0)   # 음수 방지
+        return w_ice
 
+    def _update_phi_op(self, s_op_star, w_air):
+        return s_op_star * (w_air / C.year_to_sec)
+
+    def _update_phi_cl(self, s_cl, p_cl, w_ice):
+        phi_cl = s_cl * (p_cl / C.P0) * (w_ice / C.year_to_sec)
+        return phi_cl
+
+    def _update_w_air(self, w_ice, s_cl, p_cl, s_op_star, COD_idx):
+        flux_COD = w_ice[COD_idx] * s_cl[COD_idx] * (p_cl[COD_idx] / C.P0)
+        w_air = (flux_COD + 1E-10 - w_ice * (p_cl / C.P0) * s_cl) / (s_op_star + 1E-10)
+        w_air = np.minimum(w_ice, w_air)
+        w_air[COD_idx:] = w_ice[COD_idx:]
+
+        return w_air
+
+    def _update_C_cl(self, t, C_gas, w_ice, s_cl, p_op, p_cl, s_op_star):
+        """
+        C_cl = Σ(Ci·Pi·s_cl_i) / Σ(Pi·s_cl_i)   (몰수 가중 평균)
+        """
         dt_sec = C.dt * C.year_to_sec
 
-        # closed 공극 농도: 기존 C_cl에 포획 기여분을 weighted average로 업데이트
-        # dC_cl/dt = θ · (C_gas - C_cl)  (열린 공극에서 닫힌 공극으로 유입)
-        C_cl = (self.C_cl + theta * dt_sec * self.C_gas) / (1 + theta * dt_sec)
+        # C_gas (M+1,) → (Nz,) 패딩
+        C_gas_full = np.zeros(self.Nz)
+        C_gas_full[:len(C_gas)] = C_gas
 
-        full_air  = self.s_op_star + self.s_cl * self.p_cl
-        C_total   = (C_cl * self.s_cl * self.p_cl + self.C_gas * self.s_op_star) / (full_air + 1E-30)
+        # --- parcel의 이전 위치 (Eulerian) ---
+        z_prev = self.z - w_ice / C.year_to_sec * dt_sec
+
+        # --- advection ---
+        C_cl_prev = np.interp(z_prev, self.z, self.C_cl,  left=self.C_atm[t + 1])
+        s_cl_prev = np.interp(z_prev, self.z, self.s_cl,  left=0.0)
+        p_cl_prev = np.interp(z_prev, self.z, self.p_cl,  left=self.p_atm[t + 1])
+
+        # --- 신규 트래핑 ---
+        ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
+
+        # --- C_cl 업데이트 (몰수 = P·s_cl 가중) ---
+        # 기존: Ci 불변, Pi→Pi·ξ, s_cl_i 불변 → Pi·s_cl_i = p_cl_prev·s_cl_prev·ξ
+        # 신규: Ci=C_gas, Pi=p_op, s_cl_i=ds_cl_new
+        n_old = p_cl_prev * s_cl_prev   # 기존 몰수 가중치 (ξ 상쇄: p_cl_next의 분모와 맞춤)
+        n_new = p_op * ds_cl_new   # 신규 몰수 가중치
+
+        num = C_cl_prev * n_old + C_gas_full * n_new
+        den = n_old + n_new
+
+        C_cl = num / (den + 1E-30)
+
+        # --- C_total ---
+        full_air = s_op_star + s_cl * (p_cl / C.P0)
+        C_total  = (C_cl * s_cl * (p_cl / C.P0) + C_gas_full * s_op_star) \
+                / (full_air + 1E-30)
 
         return C_cl, C_total
 
@@ -826,8 +1054,8 @@ class Profile:
     def _init_T(self):
         T = np.interp(self.z, [self.z[0], self.z[-1]], [self.T_surf[0], self.T_basal[0]])
         return T
-    
-    #Goujon et al., 2003
+        #Goujon et al., 2003
+
     def _init_rho_ice(self):
         rho_ice = 0.9165 - self.T_surf * 1.4438E-4 - self.T_surf ** 2 * 1.5175E-7
         return rho_ice
@@ -850,12 +1078,17 @@ class Profile:
 
     def _init_C_op(self):
         C_op = self.C_atm[0] * np.ones(self.M + 1)
-        C_gas = C_op.copy()
+        C_gas = self.C_atm[0] * np.ones(self.M + 1)
         C_op[self.COD_idx:] = 0.0
         return C_op, C_gas
+    
+    def _init_C_cl(self):
+        C_cl = self.C_atm[0] * np.ones(self.Nz)
+        C_total = self.C_atm[0] * np.ones(self.Nz)
+        return C_cl, C_total
     #Buizert et al., 2016
     def _init_p_op(self):
-        p_op = self.p_atm[0] * np.exp((C.M_air * C.g * self.z) / (C.R * self.T[0]))
+        p_op = self.p_atm[0] * np.exp((C.M_air * C.g * self.z) / (C.R * (self.T[0] + C.C_to_K)))
         return p_op
     #Herron and Langway, 1980
     def _init_rho(self):
@@ -880,7 +1113,7 @@ class Profile:
             return rho
 
     def _init_rho_COD_bar(self):
-        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * self.T_surf[0] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * (self.T_surf[0] + C.C_to_K) - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
 
     def _init_D_X_0(self):
         # self.D_CO2_0 = 1.39E-5 * (self.S.T/C.C_to_K) ** 1.75 * (C.P0 / self.S.p_0)
@@ -919,11 +1152,8 @@ class Profile:
         s_op = self.s - self.s_cl
         s_op[self.COD_idx:] = 0.0
         s_op_safe = s_op + 1E-9
-        return s_op, s_op_safe
-    
-    def _init_s_op_star(self):
-        return self.s_op_safe * self.p_op / C.P0
-        # return self.s_op * self.rho / self.rho_LID
+        s_op_star = s_op_safe * self.p_op / C.P0
+        return s_op, s_op_safe, s_op_star
       
     def _init_COD(self):
         COD_idx = np.argmax(self.s_cl)
@@ -938,13 +1168,13 @@ class Profile:
 
     def _init_z_LID(self):
         LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
-        return self.z[self.LID_idx]
+        return self.z[LID_idx]
 
     def _init_iez(self):
         iez = np.zeros(self.Nz)
         for i in range(1, self.Nz):
             iez[i] = np.trapz(self.rho[:i + 1], self.z[:i + 1])
-        iez /= self.S.rho_ice
+        iez /= self.rho_ice[0]
         return iez
 
     def _init_tau_inv_DZ(self):
@@ -975,7 +1205,6 @@ class Profile:
         D_eddy[self.z >= 55] = 0
         D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ)
         return D_eddy
-
     #수정해야될듯
     def _init_w_ice(self):
         #########Buizert et al., 2011###########
@@ -983,51 +1212,38 @@ class Profile:
         #########Goujon et al., 2003###########
         zeta = self.z / self.S.H
         m = 10
-        return self.S.rho_ice / self.rho * (self.S.A_ieq - self.S.A_ieq * ((m + 2) / (m + 1) * zeta) * (1 - (zeta ** (m + 1)) / (m + 2)))
+        return self.rho_ice[0] / self.rho * (self.A_ieq[0] - self.A_ieq[0] * ((m + 2) / (m + 1) * zeta) * (1 - (zeta ** (m + 1)) / (m + 2)))
 
     def _init_p_cl(self):
 
         p_cl = np.zeros(self.Nz)
-        # dz = self.z[1] - self.z[0] # dz (단일 값) 추출
-        
-        strain = np.gradient(np.log(self.w_ice), self.z)
-
         dscl = np.gradient(self.s_cl, self.z)
-        # dscl = np.concatenate([[0], np.diff(self.s_cl) / C.dz])
-        exp_term = np.exp(C.M_air * C.g * self.z / C.R / self.S.T)
 
         for i in range(self.COD_idx + 1):
             integral_num = []
             integral_den = []
-            
+
             for j in range(i + 1):
-                # MATLAB: 1 + Trapezoid(strain(j:i), dz)
-                # 주의: MATLAB의 j:i는 i번째 인덱스를 포함하므로 i+1까지 슬라이싱
-                zeta_denom = 1 + np.trapz(strain[j:i+1], dx=C.dz)
-                
-                # MATLAB: dscl(j) * C(j) * (s(j)/s(i)) / zeta_denom
-                val_num = dscl[j] * exp_term[j] * (self.s[j] / self.s[i]) / zeta_denom
+                # ξ(z', z) = ρ(z')/ρ(z)  (무차원)
+                zeta = self.rho[j] / self.rho[i]
+
+                val_num = dscl[j] * self.p_op[j] * (self.s[j] / self.s[i]) / zeta
                 integral_num.append(val_num)
                 integral_den.append(dscl[j])
 
-            # MATLAB: (dz * sum(integral)) / (dz * sum(integral2))
             if np.sum(integral_den) != 0:
                 p_cl[i] = (C.dz * np.sum(integral_num)) / (C.dz * np.sum(integral_den))
             else:
-                p_cl[i] = 1
+                p_cl[i] = self.p_op[i]
 
-        # 3. COD 이후 지점 (MATLAB의 teller1 = (teller_co+1):length(z))
+        # COD 이후
         p_cl_z_COD = p_cl[self.COD_idx]
-        for i in range(self.COD_idx + 1, self.N):
-            # MATLAB: bubble_pres(teller_co) * (s(co)/s(i)) / (v_ice(i)/v_ice(co))
-            # v_ice는 self.w_ice와 대응된다고 가정
-            ratio_s = self.s[self.COD_idx] / self.s[i]
-            ratio_v = self.w_ice[i] / self.w_ice[self.COD_idx]
-            p_cl[i] = p_cl_z_COD * ratio_s / ratio_v
+        for i in range(self.COD_idx + 1, self.Nz):
+            zeta     = self.rho[self.COD_idx] / self.rho[i]
+            p_cl[i] = p_cl_z_COD / zeta
 
-        # 예외 처리 및 초기값
         p_cl[0] = self.p_op[0]
-        p_cl[p_cl < 1] = 1
+        p_cl    = np.maximum(p_cl, self.p_op)
 
         return p_cl
 
@@ -1035,8 +1251,8 @@ class Profile:
         # flux_COD = self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] / self.rho_COD
         # w_air_before_COD = self.S.A_ieq * self.S.rho_ice / (self.s_op_star[:self.COD_idx] + 1E-10) * (flux_COD + 1E-10 - self.s_cl[:self.COD_idx] * self.p_cl[:self.COD_idx] / self.rho[:self.COD_idx])
         
-        flux_COD = self.w_ice[self.COD_idx+1] * self.s_cl[self.COD_idx+1] * self.p_cl[self.COD_idx+1]
-        w_air = (flux_COD + 1E-10 - self.w_ice * self.p_cl * self.s_cl) / (self.s_op_star + 1E-10)
+        flux_COD = self.w_ice[self.COD_idx] * self.s_cl[self.COD_idx] * (self.p_cl[self.COD_idx] / C.P0)
+        w_air = (flux_COD + 1E-10 - self.w_ice * (self.p_cl / C.P0) * self.s_cl) / (self.s_op_star + 1E-10)
         w_air = np.minimum(self.w_ice, w_air)
         w_air[self.COD_idx:] = self.w_ice[self.COD_idx:]
         # w_air = 1 / (self.s_op_star + 1E-10) * (flux_COD + 1E-10 - self.w_ice * self.s_cl * self.p_cl)
@@ -1047,49 +1263,87 @@ class Profile:
         return w_air
     
     def _init_phi_op(self):
-        return self.s_op_star * self.w_air
+        return self.s_op_star * (self.w_air / C.year_to_sec)
     
     def _init_phi_cl(self):
-        return self.s_cl * self.p_cl * self.w_ice
-
+        return self.s_cl * (self.p_cl / C.P0) * (self.w_ice / C.year_to_sec)
     ##############CIC Model######################
     def _init_x_air(self):
-        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.C_to_K) / (self.S.T * C.P0 * self.rho[self.COD_idx])
+        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.C_to_K) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
 
     def _init_eta(self):
         eta = np.zeros(self.Nz)
         for i in range(0, self.Nz):
             eta[i] = np.trapz(1 / self.w_ice[:i + 1], self.z[:i + 1])
         return eta
-    
-    def _init_C_cl(self):
-        trapping_t = np.gradient(self.phi_cl, self.z) / self.w_ice
 
-        C_cl = np.zeros(self.C_shape)
-        C_total = np.zeros(self.C_shape)
-        M_position = np.zeros(self.C_shape)
-        M_C = np.ones(self.C_shape)
-        M_position[:, -1] = self.z.copy()
-        for i in range(1, self.Nt + 1):
-            M_position[:, self.Nt - i] = np.interp(self.eta - i * C.dt, np.concatenate(([-100000, -self.eta[1]], self.eta)), np.concatenate(([-10, -C.dz], self.z)))
-        M_position[M_position < 0] = -10
-        M_C[M_position < 0] = 0
-        
-        M_trapping = np.interp(M_position, np.concatenate(([-10, -C.dz], self.z)), np.concatenate(([0, trapping_t[0]], trapping_t)))
+    def _plot_axes(self, axes):
+        z = self.z
 
-        full_air = self.s_op_star + self.s_cl * self.p_cl
+        C_op_plot = np.full(self.Nz, np.nan)
+        C_op_plot[:self.COD_idx] = self.C_op[:self.COD_idx]
 
-        for i in tqdm(range(0, self.Nt + 1)):
-            M_C_open = np.zeros(self.C_shape)
-            M_C_open[:, self.Nt] = self.C_gas[:, self.Nt - i]
-            for j in range(1, self.Nt - i + 1):
-                M_C_open[:, self.Nt - j] = np.interp(M_position[:, self.Nt - j], np.concatenate(([-10, -C.dz], self.z)), np.concatenate(([1, self.C_gas[0, self.Nt - j - i]], self.C_gas[:, self.Nt - j - i])))
-            C_cl[:, self.Nt - i] = np.sum(M_C_open * M_trapping, axis=1) / np.sum(M_C * M_trapping, axis=1)
-            C_total[:, self.Nt - i] = (C_cl[:, self.Nt - i] * self.s_cl * self.p_cl + self.C_gas[:, self.Nt - i] * self.s_op_star) / full_air
-        
-        # C_cl_test = np.sum(C_cl, 1)
+        def _plot(ax, lines, xlabel):
+            ax.cla()
+            for x, label, color in lines:
+                ax.plot(x, z, label=label, color=color)
+            ax.set_xlabel(xlabel, fontsize=8)
+            ax.set_ylabel("Depth [m]")
+            ax.set_ylim(z[-1], z[0])
+            ax.axhline(self.z_COD, color="k",    linestyle="--", linewidth=0.8, label="COD")
+            ax.axhline(self.z_LID, color="gray", linestyle="--", linewidth=0.8, label="LID")
+            ax.legend(fontsize=6, loc="lower right")
+            ax.grid(True, linestyle="--", alpha=0.5)
 
-        return C_cl, C_total
+        _plot(axes[0],
+            [(self.T,   "T",   "tab:red")],
+            "T [°C]")
+
+        _plot(axes[1],
+            [(self.rho, "ρ",   "tab:brown")],
+            "ρ [Mg/m³]")
+
+        _plot(axes[2],
+            [(self.p_op / 1e2, "p_op", "tab:blue"),
+            (self.p_cl / 1e2, "p_cl", "tab:orange")],
+            "Pressure [hPa]")
+
+        _plot(axes[3],
+            [(self.s_op, "s_op", "tab:green"),
+            (self.s_cl, "s_cl", "tab:purple")],
+            "Porosity [-]")
+
+        _plot(axes[4],
+            [(self.w_ice, "w_ice", "tab:blue"),
+            (self.w_air, "w_air", "tab:cyan")],
+            "Velocity [m/yr]")
+
+        _plot(axes[5],
+            [(self.phi_op, "φ_op", "tab:blue"),
+            (self.phi_cl, "φ_cl", "tab:orange")],
+            "Flux [m/s]")
+
+        _plot(axes[6],
+            [(C_op_plot,    "C_op",    "tab:blue"),
+            (self.C_cl,    "C_cl",    "tab:orange"),
+            (self.C_total, "C_total", "tab:green")],
+            "Concentration [ppm]")
+
+    def plot_state(self, title=""):
+        fig, axes = plt.subplots(1, 7, figsize=(18, 8), sharey=True)
+        fig.suptitle(title, fontsize=13)
+        self._plot_axes(axes)
+        plt.tight_layout()
+        plt.show(block=True)
+        # plt.tight_layout()
+        # if plt.isinteractive():
+        #     # plt.waitforbuttonpress()
+        #     # plt.close(fig)
+        #     # plt.pause(0.01)
+        #     while plt.fignum_exists(fig.number):
+        #         plt.pause(0.1)
+        # else:
+        #     plt.show()
 
     def _Delta(self, depth):
         def delta(C_):
