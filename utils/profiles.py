@@ -70,6 +70,7 @@ class Profile:
         self.C_op, self.C_gas = self._init_C_op()
 
         self.iez = self._init_iez()
+        self.Xi = self._init_Xi()
         self.rho_LID = self._init_rho_LID()
         self.z_LID = self._init_z_LID()
 
@@ -120,17 +121,18 @@ class Profile:
 
             C_op_next, C_gas_next = self._update_C_op(i, COD_idx_next)
 
-            s_op_next, s_op_safe_next, s_op_star_next = self._update_s_op(p_gas_next, s_next, s_cl_next, COD_idx_next)
+            s_op_next, s_op_safe_next, s_op_star_next = self._update_s_op(T_next, p_gas_next, s_next, s_cl_next, COD_idx_next)
 
             iez_next = self._update_iez(i, rho_next)
+            Xi_next = self._update_Xi(iez_next)
             w_ice_next = self._update_w_ice(i, rho_next, iez_next)
 
             p_cl_next = self._update_p_cl(i, T_next, rho_next, p_gas_next, w_ice_next, s_cl_next)
 
             C_cl_next, C_total_next = self._update_C_cl(i, C_gas_next, w_ice_next, s_cl_next, p_gas_next, p_cl_next, s_op_star_next)
 
-            phi_cl_next = self._update_phi_cl(s_cl_next, p_cl_next, w_ice_next)
-            w_air_next = self._update_w_air(w_ice_next, s_cl_next, p_cl_next, s_op_star_next, COD_idx_next)
+            phi_cl_next = self._update_phi_cl(T_next, s_cl_next, p_cl_next, w_ice_next)
+            w_air_next = self._update_w_air(T_next, Xi_next, w_ice_next, s_cl_next, p_cl_next, s_op_star_next, COD_idx_next)
 
             phi_op_next = self._update_phi_op(s_op_star_next, w_air_next)
 
@@ -142,6 +144,8 @@ class Profile:
             self.s, self.s_cl, self.s_op, self.s_op_safe, self.s_op_star = s_next, s_cl_next, s_op_next, s_op_safe_next, s_op_star_next
             self.w_ice, self.w_air = w_ice_next, w_air_next
             self.phi_op, self.phi_cl = phi_op_next, phi_cl_next
+            self.iez = iez_next
+            self.Xi = Xi_next
             self.COD_idx, self.rho_COD_bar, self.rho_COD, self.z_COD = COD_idx_next, rho_COD_bar_next, rho_COD_next, z_COD_next
 
             if i % PLOT_INTERVAL == 0:
@@ -844,11 +848,11 @@ class Profile:
         z_COD = self.z[COD_idx]
         return COD_idx, rho_COD, z_COD
 
-    def _update_s_op(self, p_gas, s, s_cl, COD_idx):
+    def _update_s_op(self, T, p_gas, s, s_cl, COD_idx):
         s_op = s - s_cl
         s_op[COD_idx:] = 0.0
         s_op_safe = s_op + 1E-9
-        s_op_star = s_op_safe * p_gas / C.P0
+        s_op_star = s_op_safe * (p_gas / C.P0) * (C.T0 / T)
         return s_op, s_op_safe, s_op_star
 
     def _update_p_cl(self, t, T, rho, p_gas, w_ice, s_cl):
@@ -895,6 +899,10 @@ class Profile:
             iez[i] = np.trapz(rho[:i + 1], self.z[:i + 1])
         iez /= self.rho_ice[t + 1]
         return iez
+    
+    def _update_Xi(self, iez):
+        Xi = 1 - iez / self.S.H
+        return Xi
 
     def _update_w_ice(self, t, rho, iez):
         # --- Nye model ---
@@ -906,13 +914,15 @@ class Profile:
     def _update_phi_op(self, s_op_star, w_air):
         return s_op_star * w_air
 
-    def _update_phi_cl(self, s_cl, p_cl, w_ice):
-        phi_cl = s_cl * (p_cl / C.P0) * w_ice
+    def _update_phi_cl(self, T, s_cl, p_cl, w_ice):
+        phi_cl = s_cl * (p_cl / C.P0) * (C.T0 / T) * w_ice
         return phi_cl
 
-    def _update_w_air(self, w_ice, s_cl, p_cl, s_op_star, COD_idx):
-        flux_COD = w_ice[COD_idx] * s_cl[COD_idx] * (p_cl[COD_idx] / C.P0)
-        w_air = (flux_COD + 1E-10 - w_ice * (p_cl / C.P0) * s_cl) / (s_op_star + 1E-10)
+    def _update_w_air(self, T, Xi, w_ice, s_cl, p_cl, s_op_star, COD_idx):
+
+        flux_COD = s_cl[COD_idx] * (p_cl[COD_idx] / C.P0) * w_ice[COD_idx] * (C.T0 / T[COD_idx]) * (Xi / Xi[COD_idx])
+        flux_z = s_cl * (p_cl / C.P0) * w_ice * (C.T0 / T)
+        w_air = (flux_COD + 1E-10 - flux_z) / (s_op_star + 1E-10)
         w_air = np.minimum(w_ice, w_air)
         w_air[COD_idx:] = w_ice[COD_idx:]
 
@@ -1165,17 +1175,22 @@ class Profile:
         return p_cl
 
     def _init_w_air(self):
-        flux_COD = self.w_ice[self.COD_idx] * self.s_cl[self.COD_idx] * (self.p_cl[self.COD_idx] / C.P0) * (C.T0 / self.T[self.COD_idx])
-        w_air = (flux_COD + 1E-10 - self.w_ice * (self.p_cl / C.P0) * self.s_cl) / (self.s_op_star + 1E-10)
+        flux_COD = self.s_cl[self.COD_idx] * (self.p_cl[self.COD_idx] / C.P0) * self.w_ice[self.COD_idx] * (C.T0 / self.T[self.COD_idx]) * (self.Xi / self.Xi[self.COD_idx])
+        flux_z = self.s_cl * (self.p_cl / C.P0) * self.w_ice * (C.T0 / self.T)
+        w_air = (flux_COD + 1E-10 - flux_z) / (self.s_op_star + 1E-10)
         w_air = np.minimum(self.w_ice, w_air)
         w_air[self.COD_idx:] = self.w_ice[self.COD_idx:]
         return w_air
     
+    def _init_Xi(self):
+        Xi = 1 - self.iez / self.S.H
+        return Xi
+
     def _init_phi_op(self):
         return self.s_op_star * self.w_air
     
     def _init_phi_cl(self):
-        return self.s_cl * (self.p_cl / C.P0) * self.w_ice
+        return self.s_cl * (self.p_cl / C.P0) * (C.T0 / self.T) * self.w_ice
     ##############CIC Model######################
     def _init_x_air(self):
         return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.T0) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
