@@ -1,6 +1,6 @@
 import numpy as np
 #################################Model Parameters#######################
-dz = 0.1 #m 간격 default : 0.5
+dz = 0.5 #m 간격 default : 0.5
 # Z = 200 #m 몇 m 깊이까지?
 
 dt = 0.1 #년 간격 default : 0.01
@@ -8,7 +8,6 @@ Time = 100 #simulation 기간
 
 # year_to_sec = 365.2422 * 86400
 year_to_sec = 365.25 * 86400
-C_to_K = 273.15
 hPa_to_Pa = 1E2
 m_to_cm = 1E2
 kg_to_g = 1E3
@@ -20,6 +19,7 @@ R = 8.314462
 # rho_ice = 0.92054 #?
 g = 9.82
 P0 = 101325 #Pa
+T0 = 273.15
 
 #################위도에 따른 중력가속도 식 (원하면 쓰도록)##################
 # latitude = 80

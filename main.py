@@ -11,8 +11,3 @@ if __name__ == "__main__":
     interface = Interface()
     interface.run()
 
-    # tuner = Tuner()
-    # tuner.run()2
-    
-
-    

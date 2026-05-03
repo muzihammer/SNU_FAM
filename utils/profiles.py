@@ -15,6 +15,7 @@ class Profile:
         self.G = gas
 
         self.z = np.arange(0.0, self.S.Z + C.dz / 2, C.dz)
+
         self.dz_R = np.diff(self.z)
         self.dz_R = np.append(self.dz_R, self.dz_R[-1])
         self.dz_L = np.delete(np.insert(self.dz_R, 0, self.dz_R[0]), -1)
@@ -38,14 +39,10 @@ class Profile:
         self.A_ieq = self._init_A_ieq()     #[1xNt]
         self.A_weq = self._init_A_weq()     #[1x1], for H-L model
 
-        #######Buizert et al., 2016#########
-        self.p_atm = self._init_p_atm()     #[1xNt]
-        self.p_op = self._init_p_op()       #[Nzx1]
 
         self.C_atm = self._init_C_atm()
+        self.p_atm = self._init_p_atm()     #[1xNt]
 
-        # self.plotBoundaryConditions()        
-        self.D_X_0 = self._init_D_X_0()     #[Nzx1]
 
         #######Herron and Langway, 1980#########
         self.rho = self._init_rho() #[Nzx1], Mg/m3
@@ -53,12 +50,20 @@ class Profile:
         ##############Mitchell et al., 2015##############
         self.rho_COD_bar = self._init_rho_COD_bar() #[1xNt]
 
+
+
         self.s = self._init_s()
         self.s_cl = self._init_s_cl()
 
         self.COD_idx, self.rho_COD, self.z_COD = self._init_COD()
 
         self.M = np.argmin(np.abs(self.z - (self.z_COD + 10)))
+        #######Buizert et al., 2016#########
+        self.p_op, self.p_gas = self._init_p_op()       #[Nzx1]
+        
+        # self.plotBoundaryConditions()        
+        self.D_X_0 = self._init_D_X_0()     #[Nzx1]
+
 
         self.s_op, self.s_op_safe, self.s_op_star = self._init_s_op()
 
@@ -99,13 +104,14 @@ class Profile:
 
     def run(self):
 
-        self.plot_state(title=f"Init (t = {self.t[0]:.1f} yr)")
         plt.ion()
+        self.plot_boundary_conditions()
+        self.plot_state(title=f"Init (t = {self.t[0]:.1f} yr)")
 
         for i, t in tqdm(enumerate(self.t)):
             T_next = self._update_T(i)
             rho_next = self._update_rho(i)
-            p_op_next = self._update_p_op(i)
+            p_op_next, p_gas_next = self._update_p_op(i)
 
             rho_COD_bar_next = self._update_rho_COD_bar(i)
             s_next = self._update_s(i, rho_next)
@@ -114,14 +120,14 @@ class Profile:
 
             C_op_next, C_gas_next = self._update_C_op(i, COD_idx_next)
 
-            s_op_next, s_op_safe_next, s_op_star_next = self._update_s_op(p_op_next, s_next, s_cl_next, COD_idx_next)
+            s_op_next, s_op_safe_next, s_op_star_next = self._update_s_op(p_gas_next, s_next, s_cl_next, COD_idx_next)
 
             iez_next = self._update_iez(i, rho_next)
             w_ice_next = self._update_w_ice(i, rho_next, iez_next)
 
-            p_cl_next = self._update_p_cl(i, T_next, rho_next, p_op_next, w_ice_next, s_cl_next)
+            p_cl_next = self._update_p_cl(i, T_next, rho_next, p_gas_next, w_ice_next, s_cl_next)
 
-            C_cl_next, C_total_next = self._update_C_cl(i, C_gas_next, w_ice_next, s_cl_next, p_op_next, p_cl_next, s_op_star_next)
+            C_cl_next, C_total_next = self._update_C_cl(i, C_gas_next, w_ice_next, s_cl_next, p_gas_next, p_cl_next, s_op_star_next)
 
             phi_cl_next = self._update_phi_cl(s_cl_next, p_cl_next, w_ice_next)
             w_air_next = self._update_w_air(w_ice_next, s_cl_next, p_cl_next, s_op_star_next, COD_idx_next)
@@ -130,7 +136,7 @@ class Profile:
 
             self.T = T_next
             self.rho = rho_next
-            self.p_op, self.p_cl = p_op_next, p_cl_next
+            self.p_op, self.p_cl, self.p_gas = p_op_next, p_cl_next, p_gas_next
             self.C_op, self.C_gas = C_op_next, C_gas_next
             self.C_cl, self.C_total = C_cl_next, C_total_next
             self.s, self.s_cl, self.s_op, self.s_op_safe, self.s_op_star = s_next, s_cl_next, s_op_next, s_op_safe_next, s_op_star_next
@@ -139,8 +145,8 @@ class Profile:
             self.COD_idx, self.rho_COD_bar, self.rho_COD, self.z_COD = COD_idx_next, rho_COD_bar_next, rho_COD_next, z_COD_next
 
             if i % PLOT_INTERVAL == 0:
-                self.plot_state(title=f"t = {self.t[i + 1]:.2f} yr")
-        
+                self.plot_state(title=f"t = {self.t[i]:.2f} yr", t=self.t[i])
+
         plt.ioff()
         plt.show()
 
@@ -171,7 +177,7 @@ class Profile:
         """
         dt_sec = C.dt * C.year_to_sec
         rho_ice = self.rho_ice[t + 1]
-        w = self.w_ice / C.year_to_sec      # m/yr → m/s
+        w = self.w_ice      # m/yr → m/s
 
         F_arr       = np.zeros(self.Nz)
         F_prime_arr = np.zeros(self.Nz)
@@ -182,7 +188,7 @@ class Profile:
             # w_j = w[j] * rho_ice / rho_j
 
             F = (rho_j - previous_rho[j]) / dt_sec \
-                + w[j] * (rho_j - rho_j_upper) / self.dz_L[j] \
+                + w[j] * (rho_ice / rho_j) * (rho_j - rho_j_upper) / self.dz_L[j] \
                 - rho_ice * G[j]
 
             F_prime = 1 / dt_sec \
@@ -198,7 +204,7 @@ class Profile:
             
             next_rho[j] = rho_j - F / F_prime
 
-        debug = True
+        debug = False
         if debug:
             fig, axes = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
             axes[0].plot(F_arr, self.z, color='tab:blue')
@@ -283,10 +289,10 @@ class Profile:
         previous_rho = self.rho.copy()
         rho_ice = self.rho_ice[t + 1]
 
-        K_ice = 2.22 * (1 - 0.0067 * previous_T)   # Wm-1K-1
+        K_ice = 2.22 * (1 - 0.0067 * (previous_T - C.T0))   # Wm-1K-1
         K = (K_ice * (previous_rho / rho_ice) ** (2.0 - 0.5 * previous_rho / rho_ice)) # Wm-1K-1
 
-        c_ice = (152.5 + 7.122 * (previous_T + C.C_to_K)) #Jkg-1K-1
+        c_ice = (152.5 + 7.122 * previous_T) #Jkg-1K-1
         crho_firn = c_ice * previous_rho * (C.m_to_cm ** 3) / C.kg_to_g            #JK-1m-3
 
         K_half_temp = 0.5 * (K[:-1] + K[1:])       # K_{i+1/2}, [Nz-1]
@@ -297,7 +303,7 @@ class Profile:
         K_half_R[:-1] = K_half_temp
         K_half_R[-1]  = K[-1]
 
-        w = self.w_ice / C.year_to_sec
+        w = self.w_ice
 
         # --- 무차원수 ---
         r_diff_L = K_half_L * dt_sec / (self.dz_L * self.dz_S * crho_firn)       # 확산 (왼쪽)
@@ -313,18 +319,16 @@ class Profile:
 
         # --- 경계조건 적용 ---
         # z=0 : Dirichlet (표면 온도)
-        T_surf = self.T_surf[t + 1]
         diag[0] = 1.0
         sup[0]  = 0.0
         sub[0]  = 0.0
-        rhs[0]  = T_surf
+        rhs[0]  = self.T_surf[t + 1]
 
         # z=H : Dirichlet (바닥 온도)
-        T_basal = self.T_basal[t + 1]
         diag[-1] = 1.0
         sub[-1]  = 0.0
         sup[-1]  = 0.0
-        rhs[-1]  = T_basal
+        rhs[-1]  = self.T_basal[t + 1]
 
         # --- Thomas 알고리즘 ---
         next_T = self._thomas_solve(sub, diag, sup, rhs)
@@ -426,7 +430,7 @@ class Profile:
                 + l_2prime**2 * c_Z * (2*l_2prime - 3)
                 + c_Z
             )
-            A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T + C.C_to_K))
+            A_creep = 7.89E-15 * np.exp(-Q / (C.R * previous_T))
             P_star  = 4 * np.pi * P / a_contact / Z / D
 
             # --- Stage 1→2 전환 인덱스 ---
@@ -474,7 +478,7 @@ class Profile:
 
             # --- Stage 3a (D > 0.9) ---
             P_atm = self.p_atm[t]
-            V_c   = (6.95E-4 * (T_s + C.C_to_K) - 0.0043) / C.m_to_cm**3 * C.kg_to_g
+            V_c   = (6.95E-4 * T_s - 0.0043) / C.m_to_cm**3 * C.kg_to_g
             D_c   = 1 / (V_c * self.rho_ice[t] * C.Mg_to_kg + 1)
             P_b   = P_atm * (D * (1 - D_c) / D_c / (1 - D))
             P_eff = np.maximum(P + P_atm - P_b, 0.0)
@@ -485,57 +489,12 @@ class Profile:
                     * (2 * P_eff[m3] / n)**n)
 
             # --- Stage 3b (D > 0.98) ---
-            A_creep_3b = 1.2E-3 * np.exp(-Q / C.R / (previous_T + C.C_to_K))
+            A_creep_3b = 1.2E-3 * np.exp(-Q / (C.R * previous_T))
             m4 = D > 0.98
             G[m4] = (9/4) * A_creep_3b[m4] * (1 - D[m4]) * P_eff[m4]
 
             return G, gamma
-            """
-            # # --- Stage 3a: Bubbly ice, cylindrical, 0.905 ≤ D < 0.945 (Eq. A10) ---
-            # m3 = (0.905 <= D) & (D < 0.945)
-
-            # A_creep = 7.89E-15 * np.exp(-Q / C.R / (previous_T[m3] + C.C_to_K))
-            # P_atm = self.p_atm[t]
-            # V_c = (6.95E-4 * (T_s + C.C_to_K) - 0.0043) / C.m_to_cm ** 3 * C.kg_to_g
-            # D_c = 1 / (V_c * self.rho_ice[t] * C.Mg_to_kg + 1)
-            # P_b = P_atm * (D[m3] * (1 - D_c) / D_c / (1 - D[m3]))
-            # P_eff = np.maximum(P[m3] + P_atm - P_b, 0.0)
-
-            # G[m3] = 2 * A_creep \
-            #         * (D[m3] * (1 - D[m3]) / (1 - (1 - D[m3]) ** (1 / n)) ** n) \
-            #         * (2 * P_eff / n) ** n
-
-            # # --- 전환 구간: Stage 2 → 3a (0.895 ≤ D < 0.905) ---
-            # m2_3 = (0.895 <= D) & (D < 0.905)
-            # if np.any(m2) and np.any(m3) and np.any(m2_3):
-            #     hermite = CubicHermiteSpline(
-            #         x=[D[m2][-1], D[m3][0]],
-            #         y=[G[m2][-1], G[m3][0]],
-            #         dydx=[np.gradient(G[m2], D[m2])[-1], np.gradient(G[m3], D[m3])[0]]
-            #     )
-            #     G[m2_3] = hermite(D[m2_3])
-
-            # # --- Stage 3b: Bubbly ice, spherical, 0.955 ≤ D < 1.0 (Eq. A13) ---
-            # m4 = (0.955 <= D) & (D <= 1.0)
-
-            # A_creep = 1.2E-3 * np.exp(-Q / C.R / (previous_T[m4] + C.C_to_K))
-            # P_b = P_atm * (D[m4] * (1 - D_c) / D_c / (1 - D[m4]))
-            # P_eff = np.maximum(P[m4] + P_atm - P_b, 0.0)
-
-            # G[m4] = (9 / 4) * A_creep * (1 - D[m4]) * P_eff
-
-            # # --- 전환 구간: Stage 3a → 3b (0.945 ≤ D < 0.955) ---
-            # m3_4 = (0.945 <= D) & (D < 0.955)
-            # if np.any(m3) and np.any(m4) and np.any(m3_4):
-            #     hermite = CubicHermiteSpline(
-            #         x=[D[m3][-1], D[m4][0]],
-            #         y=[G[m3][-1], G[m4][0]],
-            #         dydx=[np.gradient(G[m3], D[m3])[-1], np.gradient(G[m4], D[m4])[0]]
-            #     )
-            #     G[m3_4] = hermite(D[m3_4])
-
-            # return G
-            """
+            
 
         
         previous_T = self.T.copy()
@@ -550,7 +509,7 @@ class Profile:
             P[i] = np.trapz(previous_rho[:i + 1], self.z[:i + 1]) * C.g * C.Mg_to_kg
         
         # --- D_0: Stage 1→2 전환 밀도 (Eq. A2) ---
-        D_0 = min(0.00226 * T_s + 0.647, 0.59)
+        D_0 = min(0.00226 * T_s + 0.647, 0.56)
 
         # gamma = 1.60228E-9
         gamma = 0.5 / C.year_to_sec
@@ -566,86 +525,33 @@ class Profile:
         G_grad[np.isnan(G_grad)] = 0.0
 
         ##############################################################
-        fig, axes = plt.subplots(1, 4, figsize=(16, 6), sharey=True)
+        debug = False
+        if debug:
+            fig, axes = plt.subplots(1, 4, figsize=(16, 6), sharey=True)
 
-        z_stage12 = self.z[ind1]
-        z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
-        z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
+            z_stage12 = self.z[ind1]
+            z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
+            z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
 
-        for ax, x, xlabel in zip(axes,
-                                [G,  G_grad,          D,                     P],
-                                ['G (dD/dt) [s⁻¹]', 'G_grad [s⁻¹/(-)]', 'D (relative density)', 'P (overburden) [Pa]']):
-            ax.plot(x, self.z, color='tab:blue')
-            ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
-            ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
-            ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
-            ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel('Depth [m]')
-            ax.set_ylim(self.z[-1], self.z[0])
-            ax.grid(True, linestyle='--', alpha=0.5)
-            ax.legend(fontsize=6)
+            for ax, x, xlabel in zip(axes,
+                                    [G,  G_grad,          D,                     P],
+                                    ['G (dD/dt) [s⁻¹]', 'G_grad [s⁻¹/(-)]', 'D (relative density)', 'P (overburden) [Pa]']):
+                ax.plot(x, self.z, color='tab:blue')
+                ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
+                ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
+                ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
+                ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel('Depth [m]')
+                ax.set_ylim(self.z[-1], self.z[0])
+                ax.grid(True, linestyle='--', alpha=0.5)
+                ax.legend(fontsize=6)
 
-        fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
-        plt.show()
+            fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
+            plt.show()
         ##################################################################
 
 
-
-        # dt_sec  = C.dt * C.year_to_sec
-        # rho_ice = self.rho_ice[t + 1]
-        # w       = self.w_ice / C.year_to_sec
-
-        # alpha = 1.0 / dt_sec - G_grad          # (1/dt - G_grad)
-        # r_adv = w / self.dz_L                  # w/dz
-
-        # sub  = -r_adv                           # ρ_{i-1}^{n+1} 계수
-        # diag = alpha + r_adv                    # ρ_i^{n+1} 계수
-        # sup  = np.zeros(self.Nz)
-        # rhs  = alpha * previous_rho + rho_ice * G  # 우변
-
-        # # 표면 경계조건
-        # sub[0]  = 0.0
-        # diag[0] = 1.0
-        # sup[0]  = 0.0
-        # rhs[0]  = self.S.rho_0
-
-        # next_rho = self._thomas_solve(sub, diag, sup, rhs)
-        # return next_rho
-
-        # # G_grad = np.gradient(G, D)
-        # dG_dz = np.gradient(G, self.z)
-        # dD_dz = np.gradient(D, self.z)
-        # # dD_dz가 0에 가까운 곳(깊은 얼음) 방지
-        # G_grad = np.where(np.abs(dD_dz) > 1e-10, dG_dz / dD_dz, 0.0)
-        # G_grad[np.isnan(G_grad)] = 0.0
-
-        # ##############################################################
-        # fig, axes = plt.subplots(1, 4, figsize=(16, 6), sharey=True)
-
-        # z_stage12 = self.z[ind1]
-        # z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
-        # z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
-
-        # for ax, x, xlabel in zip(axes,
-        #                         [G,  G_grad,          D,                     P],
-        #                         ['G (dD/dt) [s⁻¹]', 'G_grad [s⁻¹/(-)]', 'D (relative density)', 'P (overburden) [Pa]']):
-        #     ax.plot(x, self.z, color='tab:blue')
-        #     ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
-        #     ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
-        #     ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
-        #     ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
-        #     ax.set_xlabel(xlabel)
-        #     ax.set_ylabel('Depth [m]')
-        #     ax.set_ylim(self.z[-1], self.z[0])
-        #     ax.grid(True, linestyle='--', alpha=0.5)
-        #     ax.legend(fontsize=6)
-
-        # fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
-        # plt.show()
-        # ##################################################################
-
-        
         # --- Newton-Raphson 반복 (3회) ---
         next_rho = previous_rho.copy()
         for _ in range(3):
@@ -732,33 +638,37 @@ class Profile:
         p_bar = np.mean(self.p_atm)     # Pa
  
         # --- 투과도 (Adolph & Albert, 2014) ---
-        k = np.power(10.0, -7.7 + 14.46 * self.s_op_safe)   # m²
-        k[self.s_op < 1E-10] = 0.0
- 
-        k_star = k * self.s_op_safe                            # m²
+        k = np.power(10.0, -7.7 + 14.46 * self.s_op_safe[:self.M])   # m²
+        # k[self.s_op < 1E-10] = 0.0
+
+        k_star = k * self.s_op_safe[:self.M]                           # m²
  
         # --- dk*/dz (중심 차분) ---
-        dk_star_dz = np.gradient(k_star, self.z)
+        dk_star_dz = np.gradient(k_star, self.z[:self.M])
  
         # --- 계수 A(z), B(z), C(z) ---
-        F = p_bar / (mu * self.s_op_safe)  # [Pa / (Pa·s)] = [1/s]
+        F = p_bar / (mu * self.s_op_safe[:self.M])  # [Pa / (Pa·s)] = [1/s]
  
         A_z = F * k_star                                   # m²/s
-        B_z = F * (dk_star_dz - k_star * C.M_air * C.g / (C.R * self.T))  # m/s
-        C_z = F * (-dk_star_dz * C.M_air * C.g / (C.R * self.T))          # 1/s
+        B_z = F * (dk_star_dz - k_star * C.M_air * C.g / (C.R * self.T[:self.M]))  # m/s
+        C_z = F * (-dk_star_dz * C.M_air * C.g / (C.R * (self.T[:self.M])))       # 1/s
  
         # --- Backward Euler 삼중대각 계수 ---
-        r_diff_L = A_z * dt_sec / (self.dz_L * self.dz_S)
-        r_diff_C = A_z * dt_sec * (1.0/self.dz_L + 1.0/self.dz_R) / self.dz_S
-        r_diff_R = A_z * dt_sec / (self.dz_R * self.dz_S) # 확산 무차원수
-        r_adv  = B_z * dt_sec / (2.0 * self.dz_S)    # 이류 무차원수
+        dz_L = self.dz_L[:self.M]
+        dz_R = self.dz_R[:self.M]
+        dz_S = self.dz_S[:self.M]
+
+        r_diff_L = A_z * dt_sec / (dz_L * dz_S)
+        r_diff_C = A_z * dt_sec * (1.0/dz_L + 1.0/dz_R) / dz_S
+        r_diff_R = A_z * dt_sec / (dz_R * dz_S) # 확산 무차원수
+        r_adv  = B_z * dt_sec / (2.0 * dz_S)    # 이류 무차원수
         r_reac = C_z * dt_sec                  # 반응 무차원수
  
         sub  = -(r_diff_L - r_adv)               # 하삼각
         diag = 1.0 + r_diff_C - r_reac    # 대각
         sup  = -(r_diff_R + r_adv)               # 상삼각
  
-        rhs = self.p_op.copy()                       # 우변 = p^n
+        rhs = self.p_gas[:self.M].copy()                       # 우변 = p^n
  
         # --- 경계조건 적용 ---
         # z=0 : Dirichlet (표면 기압 = 대기압)
@@ -776,9 +686,13 @@ class Profile:
         rhs[-1]  = 0.0
  
         # --- Thomas 알고리즘 (삼중대각 직접 풀이) ---
-        p_next = self._thomas_solve(sub, diag, sup, rhs)
- 
-        return p_next
+        p_op = self._thomas_solve(sub, diag, sup, rhs)
+        p_op[0] = self.p_atm[t + 1]
+        p_gas = np.zeros(self.Nz)
+        p_gas[:self.M] = p_op.copy()
+        p_gas[self.M:] = p_gas[self.M - 1]
+
+        return p_op, p_gas
     
     def _update_C_op(self, t, COD_idx):
         """
@@ -843,20 +757,20 @@ class Profile:
         # --- 계수 α, β, γ (논문 Eq. 5.17-5.20) ---
         alpha = self.D_X + self.D_eddy                           # [m²/s]
  
-        _beta = (1.0 / self.s_op_star
-                 * np.gradient(self.s_op_star * (self.D_X + self.D_eddy), self.z))
+        _beta = (1.0 / self.s_op_star[:self.M]
+                 * np.gradient(self.s_op_star[:self.M] * (self.D_X + self.D_eddy), self.z[:self.M]))
         _beta[self.COD_idx] = _beta[self.COD_idx + 1]           # COD 특이점 보정
  
-        beta = (-self.D_X * (Delta_M * C.g) / (C.R * self.T)
-                + self.D_eddy * (C.M_air * C.g) / (C.R * self.T)
-                - self.w_air / C.year_to_sec                     # m/yr → m/s
+        beta = (-self.D_X * (Delta_M * C.g) / (C.R * self.T[:self.M])
+                + self.D_eddy * (C.M_air * C.g) / (C.R * self.T[:self.M])
+                - self.w_air[:self.M]                     # m/yr → m/s
                 + _beta)                                          # [m/s]
  
-        _gamma = (1.0 / self.s_op_star
-                  * np.gradient(self.s_op_star * self.D_X, self.z))
+        _gamma = (1.0 / self.s_op_star[:self.M]
+                  * np.gradient(self.s_op_star[:self.M] * self.D_X, self.z[:self.M]))
         _gamma[self.COD_idx] = _gamma[self.COD_idx + 1]
  
-        gamma = (-Delta_M * C.g / C.R / self.T * _gamma
+        gamma = (-Delta_M * C.g / C.R / self.T[:self.M] * _gamma
                  - self.G.lambda_X)                               # [1/s]
  
         # --- 무차원 Crank-Nicolson 계수 (논문 Eq. 5.22) ---
@@ -864,7 +778,7 @@ class Profile:
         beta_i_star  = beta  * Delta_t / (4.0 * Delta_z)
         gamma_i_star = gamma * Delta_t / 2.0
  
-        M = self.M   # 유효 깊이 인덱스 상한
+        M = self.M - 1   # 유효 깊이 인덱스 상한
  
         # --- A 행렬 (암시적, t+1 시점) (논문 Eq. 5.23, 5.25) ---
         diag_A = 1.0 + 2.0 * alpha_i_star - gamma_i_star
@@ -902,10 +816,10 @@ class Profile:
         # --- Thomas 알고리즘으로 A · C^{n+1} = rhs 풀기 ---
         C_gas = self._thomas_solve(sub_A, diag_A, sup_A, rhs)
         C_gas[0] = self.C_atm[t + 1]          # Dirichlet 표면 경계 재확인
- 
+
         C_op = C_gas.copy()
         C_op[COD_idx:] = 0.0    # COD 이하 개방공극 농도 = 0
- 
+
         return C_op, C_gas
 
     def _update_rho_COD_bar(self, t):
@@ -930,22 +844,22 @@ class Profile:
         z_COD = self.z[COD_idx]
         return COD_idx, rho_COD, z_COD
 
-    def _update_s_op(self, p_op, s, s_cl, COD_idx):
+    def _update_s_op(self, p_gas, s, s_cl, COD_idx):
         s_op = s - s_cl
         s_op[COD_idx:] = 0.0
         s_op_safe = s_op + 1E-9
-        s_op_star = s_op_safe * p_op / C.P0
+        s_op_star = s_op_safe * p_gas / C.P0
         return s_op, s_op_safe, s_op_star
 
-    def _update_p_cl(self, t, T, rho, p_op, w_ice, s_cl):
+    def _update_p_cl(self, t, T, rho, p_gas, w_ice, s_cl):
         dt_sec = C.dt * C.year_to_sec
 
         # --- parcel의 이전 위치 ---
-        z_prev = self.z - w_ice / C.year_to_sec * dt_sec
+        z_prev = self.z - w_ice * dt_sec
 
         # --- T_ratio ---
         T_prev  = np.interp(z_prev, self.z, self.T, left=self.T_surf[t + 1])
-        T_ratio = (T + C.C_to_K) / (T_prev + C.C_to_K)
+        T_ratio = T / T_prev
 
         # --- eff_strain ---
         rho_prev   = np.interp(z_prev, self.z, self.rho, left=self.S.rho_0)
@@ -965,13 +879,13 @@ class Profile:
         ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
 
         # --- p_cl 업데이트 ---
-        num = p_cl_prev * zeta * s_cl_prev + p_op * ds_cl_new
+        num = p_cl_prev * zeta * s_cl_prev + p_gas * ds_cl_new
         den = s_cl_prev + ds_cl_new + 1E-30
 
         p_cl = num / den
 
         # 물리 제약
-        p_cl = np.maximum(p_cl, p_op)
+        p_cl = np.maximum(p_cl, p_gas)
 
         return p_cl
 
@@ -990,10 +904,10 @@ class Profile:
         return w_ice
 
     def _update_phi_op(self, s_op_star, w_air):
-        return s_op_star * (w_air / C.year_to_sec)
+        return s_op_star * w_air
 
     def _update_phi_cl(self, s_cl, p_cl, w_ice):
-        phi_cl = s_cl * (p_cl / C.P0) * (w_ice / C.year_to_sec)
+        phi_cl = s_cl * (p_cl / C.P0) * w_ice
         return phi_cl
 
     def _update_w_air(self, w_ice, s_cl, p_cl, s_op_star, COD_idx):
@@ -1004,7 +918,7 @@ class Profile:
 
         return w_air
 
-    def _update_C_cl(self, t, C_gas, w_ice, s_cl, p_op, p_cl, s_op_star):
+    def _update_C_cl(self, t, C_gas, w_ice, s_cl, p_gas, p_cl, s_op_star):
         """
         C_cl = Σ(Ci·Pi·s_cl_i) / Σ(Pi·s_cl_i)   (몰수 가중 평균)
         """
@@ -1015,7 +929,7 @@ class Profile:
         C_gas_full[:len(C_gas)] = C_gas
 
         # --- parcel의 이전 위치 (Eulerian) ---
-        z_prev = self.z - w_ice / C.year_to_sec * dt_sec
+        z_prev = self.z - w_ice * dt_sec
 
         # --- advection ---
         C_cl_prev = np.interp(z_prev, self.z, self.C_cl,  left=self.C_atm[t + 1])
@@ -1029,7 +943,7 @@ class Profile:
         # 기존: Ci 불변, Pi→Pi·ξ, s_cl_i 불변 → Pi·s_cl_i = p_cl_prev·s_cl_prev·ξ
         # 신규: Ci=C_gas, Pi=p_op, s_cl_i=ds_cl_new
         n_old = p_cl_prev * s_cl_prev   # 기존 몰수 가중치 (ξ 상쇄: p_cl_next의 분모와 맞춤)
-        n_new = p_op * ds_cl_new   # 신규 몰수 가중치
+        n_new = p_gas * ds_cl_new   # 신규 몰수 가중치
 
         num = C_cl_prev * n_old + C_gas_full * n_new
         den = n_old + n_new
@@ -1057,7 +971,8 @@ class Profile:
         #Goujon et al., 2003
 
     def _init_rho_ice(self):
-        rho_ice = 0.9165 - self.T_surf * 1.4438E-4 - self.T_surf ** 2 * 1.5175E-7
+        T_surf = self.T_surf - C.T0
+        rho_ice = 0.9165 - T_surf * 1.4438E-4 - T_surf ** 2 * 1.5175E-7
         return rho_ice
 
     def _init_A_ieq(self):
@@ -1077,8 +992,8 @@ class Profile:
         return C_atm
 
     def _init_C_op(self):
-        C_op = self.C_atm[0] * np.ones(self.M + 1)
-        C_gas = self.C_atm[0] * np.ones(self.M + 1)
+        C_op = self.C_atm[0] * np.ones(self.M)
+        C_gas = self.C_atm[0] * np.ones(self.M)
         C_op[self.COD_idx:] = 0.0
         return C_op, C_gas
     
@@ -1088,8 +1003,10 @@ class Profile:
         return C_cl, C_total
     #Buizert et al., 2016
     def _init_p_op(self):
-        p_op = self.p_atm[0] * np.exp((C.M_air * C.g * self.z) / (C.R * (self.T[0] + C.C_to_K)))
-        return p_op
+        p_op = self.p_atm[0] * np.exp((C.M_air * C.g * self.z) / (C.R * self.T[0]))
+        p_gas = p_op[:self.M].copy()
+        p_op[self.COD_idx:] = np.nan
+        return p_op, p_gas
     #Herron and Langway, 1980
     def _init_rho(self):
         if self.S.use_HL:
@@ -1113,11 +1030,10 @@ class Profile:
             return rho
 
     def _init_rho_COD_bar(self):
-        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * (self.T_surf[0] + C.C_to_K) - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * self.T_surf[0] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
 
     def _init_D_X_0(self):
-        # self.D_CO2_0 = 1.39E-5 * (self.S.T/C.C_to_K) ** 1.75 * (C.P0 / self.S.p_0)
-        D_CO2_0 = 5.75E-10 * self.T ** 1.81 * (C.P0 / self.p_op)
+        D_CO2_0 = 5.75E-10 * self.T[:self.M] ** 1.81 * (C.P0 / self.p_gas)
         # self.D_CO2_0 = 1.638946715E-05  # Buizert's MATLAB code
         D_X_0 = self.G.gamma_X * D_CO2_0
         return D_X_0
@@ -1152,7 +1068,8 @@ class Profile:
         s_op = self.s - self.s_cl
         s_op[self.COD_idx:] = 0.0
         s_op_safe = s_op + 1E-9
-        s_op_star = s_op_safe * self.p_op / C.P0
+        s_op_star = s_op_safe.copy()
+        s_op_star[:self.COD_idx] = s_op_safe[:self.COD_idx] * (self.p_op[:self.COD_idx] / C.P0) * (C.T0 / self.T[:self.COD_idx])
         return s_op, s_op_safe, s_op_star
       
     def _init_COD(self):
@@ -1189,7 +1106,7 @@ class Profile:
         return D_m
 
     def _init_D_X(self):
-        D_X = self.D_X_0 * self.tau_inv_DZ
+        D_X = self.D_X_0 * self.tau_inv_DZ[:self.M]
         return D_X
     
     def _init_D_eddy(self):
@@ -1201,9 +1118,9 @@ class Profile:
         else:
             D_eddy_0 = 2.30453E-5
         # D_eddy_0 = 1.6E-5
-        D_eddy = D_eddy_0 * np.exp(-self.z / H)
-        D_eddy[self.z >= 55] = 0
-        D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ)
+        D_eddy = D_eddy_0 * np.exp(-self.z[:self.M] / H)
+        D_eddy[self.z[:self.M] >= 55] = 0
+        D_eddy = np.maximum(D_eddy, self.tau_inv_LIZ[:self.M])
         return D_eddy
     #수정해야될듯
     def _init_w_ice(self):
@@ -1227,14 +1144,14 @@ class Profile:
                 # ξ(z', z) = ρ(z')/ρ(z)  (무차원)
                 zeta = self.rho[j] / self.rho[i]
 
-                val_num = dscl[j] * self.p_op[j] * (self.s[j] / self.s[i]) / zeta
+                val_num = dscl[j] * self.p_gas[j] * (self.s[j] / self.s[i]) / zeta
                 integral_num.append(val_num)
                 integral_den.append(dscl[j])
 
             if np.sum(integral_den) != 0:
                 p_cl[i] = (C.dz * np.sum(integral_num)) / (C.dz * np.sum(integral_den))
             else:
-                p_cl[i] = self.p_op[i]
+                p_cl[i] = self.p_gas[i]
 
         # COD 이후
         p_cl_z_COD = p_cl[self.COD_idx]
@@ -1243,33 +1160,25 @@ class Profile:
             p_cl[i] = p_cl_z_COD / zeta
 
         p_cl[0] = self.p_op[0]
-        p_cl    = np.maximum(p_cl, self.p_op)
+        p_cl[:self.M]    = np.maximum(p_cl[:self.M], self.p_gas)
 
         return p_cl
 
     def _init_w_air(self):
-        # flux_COD = self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] / self.rho_COD
-        # w_air_before_COD = self.S.A_ieq * self.S.rho_ice / (self.s_op_star[:self.COD_idx] + 1E-10) * (flux_COD + 1E-10 - self.s_cl[:self.COD_idx] * self.p_cl[:self.COD_idx] / self.rho[:self.COD_idx])
-        
-        flux_COD = self.w_ice[self.COD_idx] * self.s_cl[self.COD_idx] * (self.p_cl[self.COD_idx] / C.P0)
+        flux_COD = self.w_ice[self.COD_idx] * self.s_cl[self.COD_idx] * (self.p_cl[self.COD_idx] / C.P0) * (C.T0 / self.T[self.COD_idx])
         w_air = (flux_COD + 1E-10 - self.w_ice * (self.p_cl / C.P0) * self.s_cl) / (self.s_op_star + 1E-10)
         w_air = np.minimum(self.w_ice, w_air)
         w_air[self.COD_idx:] = self.w_ice[self.COD_idx:]
-        # w_air = 1 / (self.s_op_star + 1E-10) * (flux_COD + 1E-10 - self.w_ice * self.s_cl * self.p_cl)
-        # close_idx = np.argmin(np.abs(w_air - self.w_ice))
-        # w_air[close_idx:] = self.w_ice[close_idx:]
-
-        # w_air_after_COD = self.w_ice[self.COD_idx:]
         return w_air
     
     def _init_phi_op(self):
-        return self.s_op_star * (self.w_air / C.year_to_sec)
+        return self.s_op_star * self.w_air
     
     def _init_phi_cl(self):
-        return self.s_cl * (self.p_cl / C.P0) * (self.w_ice / C.year_to_sec)
+        return self.s_cl * (self.p_cl / C.P0) * self.w_ice
     ##############CIC Model######################
     def _init_x_air(self):
-        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.C_to_K) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
+        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.T0) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
 
     def _init_eta(self):
         eta = np.zeros(self.Nz)
@@ -1283,13 +1192,25 @@ class Profile:
         C_op_plot = np.full(self.Nz, np.nan)
         C_op_plot[:self.COD_idx] = self.C_op[:self.COD_idx]
 
+        p_op_plot = np.full(self.Nz, np.nan)
+        p_op_plot[:self.COD_idx] = self.p_op[:self.COD_idx]
+
         def _plot(ax, lines, xlabel):
+            xlim = ax.get_xlim()
+            is_first = not ax.lines  # 아직 아무것도 그려지지 않은 상태
             ax.cla()
             for x, label, color in lines:
                 ax.plot(x, z, label=label, color=color)
             ax.set_xlabel(xlabel, fontsize=8)
             ax.set_ylabel("Depth [m]")
             ax.set_ylim(z[-1], z[0])
+
+            if not is_first:
+                data_min = min(np.nanmin(x) for x, _, _ in lines)
+                data_max = max(np.nanmax(x) for x, _, _ in lines)
+                new_xlim = (min(xlim[0], data_min), max(xlim[1], data_max))
+                ax.set_xlim(new_xlim)
+
             ax.axhline(self.z_COD, color="k",    linestyle="--", linewidth=0.8, label="COD")
             ax.axhline(self.z_LID, color="gray", linestyle="--", linewidth=0.8, label="LID")
             ax.legend(fontsize=6, loc="lower right")
@@ -1297,16 +1218,16 @@ class Profile:
 
         _plot(axes[0],
             [(self.T,   "T",   "tab:red")],
-            "T [°C]")
+            "T [K]")
 
         _plot(axes[1],
             [(self.rho, "ρ",   "tab:brown")],
             "ρ [Mg/m³]")
 
         _plot(axes[2],
-            [(self.p_op / 1e2, "p_op", "tab:blue"),
-            (self.p_cl / 1e2, "p_cl", "tab:orange")],
-            "Pressure [hPa]")
+            [(p_op_plot, "p_op", "tab:blue"),
+            (self.p_cl, "p_cl", "tab:orange")],
+            "Pressure [Pa]")
 
         _plot(axes[3],
             [(self.s_op, "s_op", "tab:green"),
@@ -1329,21 +1250,20 @@ class Profile:
             (self.C_total, "C_total", "tab:green")],
             "Concentration [ppm]")
 
-    def plot_state(self, title=""):
-        fig, axes = plt.subplots(1, 7, figsize=(18, 8), sharey=True)
-        fig.suptitle(title, fontsize=13)
-        self._plot_axes(axes)
+    def plot_state(self, title="", t=None):
+        if not hasattr(self, '_fig') or not plt.fignum_exists(self._fig.number):
+            self._fig, self._axes = plt.subplots(1, 7, figsize=(18, 8), sharey=True)
+        self._fig.suptitle(title, fontsize=13)
+        self._plot_axes(self._axes)
         plt.tight_layout()
-        plt.show(block=True)
-        # plt.tight_layout()
-        # if plt.isinteractive():
-        #     # plt.waitforbuttonpress()
-        #     # plt.close(fig)
-        #     # plt.pause(0.01)
-        #     while plt.fignum_exists(fig.number):
-        #         plt.pause(0.1)
-        # else:
-        #     plt.show()
+
+        # boundary condition 수직선 업데이트
+        if t is not None and hasattr(self, '_bc_vlines'):
+            for vline in self._bc_vlines:
+                vline.set_xdata([t, t])
+            self._bc_fig.canvas.draw_idle()
+
+        plt.pause(0.01)
 
     def _Delta(self, depth):
         def delta(C_):
@@ -1452,14 +1372,36 @@ class Profile:
         plt.ylabel("Depth [m]")
         plt.show()
 
-    def plotBoundaryConditions(self):
-        plt.plot(self.t, self.T_surf)
-        plt.show()
-        plt.plot(self.t, self.T_basal)
-        plt.show()
-        plt.plot(self.t, self.A_ieq)
-        plt.show()
-        plt.plot(self.t, self.p_atm)
-        plt.show()
-        plt.plot(self.t, self.C_atm)
-        plt.show()
+    def plot_boundary_conditions(self):
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        fig.suptitle("Boundary Conditions", fontsize=13)
+
+        axes[0, 0].plot(self.t, self.T_surf,  color="tab:red")
+        axes[0, 0].set_xlabel("t [yr]")
+        axes[0, 0].set_ylabel("T_surf [°C]")
+        axes[0, 0].grid(True, linestyle="--", alpha=0.5)
+
+        axes[0, 1].plot(self.t, self.A_ieq,   color="tab:blue")
+        axes[0, 1].set_xlabel("t [yr]")
+        axes[0, 1].set_ylabel("Accumulation [m/s]")
+        axes[0, 1].grid(True, linestyle="--", alpha=0.5)
+
+        axes[1, 0].plot(self.t, self.p_atm,   color="tab:green")
+        axes[1, 0].set_xlabel("t [yr]")
+        axes[1, 0].set_ylabel("p_atm [Pa]")
+        axes[1, 0].grid(True, linestyle="--", alpha=0.5)
+
+        axes[1, 1].plot(self.t, self.C_atm,   color="tab:orange")
+        axes[1, 1].set_xlabel("t [yr]")
+        axes[1, 1].set_ylabel("C_atm [ppm]")
+        axes[1, 1].grid(True, linestyle="--", alpha=0.5)
+
+        # 현재 시간 수직선 저장
+        self._bc_vlines = [
+            ax.axvline(self.t[0], color="k", linestyle="--", linewidth=1.0)
+            for ax in axes.flat
+        ]
+        self._bc_fig = fig
+
+        plt.tight_layout()
+        plt.pause(0.01)

@@ -25,12 +25,15 @@ class Site:
     def read(self):
         self.A_ieq = np.loadtxt(C.ROOT + "icecores\\" + self.name + "\\accumulation_rate.txt")
         self.A_ieq = self._sort_data(self.A_ieq)
+        self.A_ieq[:,1] /= C.year_to_sec
 
         self.T_surf = np.loadtxt(C.ROOT + "icecores\\" + self.name + "\\temperature_surface.txt")
         self.T_surf = self._sort_data(self.T_surf)
+        self.T_surf[:,1] += C.T0
 
         self.T_basal = np.loadtxt(C.ROOT + "icecores\\" + self.name + "\\temperature_basal.txt")
         self.T_basal = self._sort_data(self.T_basal)
+        self.T_basal[:,1] += C.T0
         # self.T_surf += C.C_to_K
         # self.T_basal += C.C_to_K
         self.p_atm = np.loadtxt(C.ROOT + "icecores\\" + self.name + "\\pressure_surface.txt")
