@@ -71,8 +71,8 @@ class Profile:
 
         self.iez = self._init_iez()
         self.Xi = self._init_Xi()
-        self.rho_LID = self._init_rho_LID()
-        self.z_LID = self._init_z_LID()
+        # self.rho_LID = self._init_rho_LID()
+        # self.z_LID = self._init_z_LID()
 
         self.C_shape = (self.Nz, self.Nt)
         # self.M = np.argmin(np.abs(self.z - self.S.Z))
@@ -84,8 +84,8 @@ class Profile:
 
         self.D_X = self._init_D_X()
         self.D_eddy = self._init_D_eddy()
-        print("rho_LID : ", self.rho_LID, " rho_COD : ", self.rho_COD)
-        print("LID : ", self.z_LID, "m, COD : ", self.z_COD, "m")
+        # print("rho_LID : ", self.rho_LID, " rho_COD : ", self.rho_COD)
+        # print("LID : ", self.z_LID, "m, COD : ", self.z_COD, "m")
 
         ##############Buizert et al., 2011##############
         self.w_ice = self._init_w_ice()
@@ -105,9 +105,11 @@ class Profile:
 
     def run(self):
 
+        self.plot_state(title=f"Init (t = {self.t[0]:.1f} yr)")
+        plt.waitforbuttonpress()
+
         plt.ion()
         self.plot_boundary_conditions()
-        self.plot_state(title=f"Init (t = {self.t[0]:.1f} yr)")
 
         for i, t in tqdm(enumerate(self.t)):
             T_next = self._update_T(i)
@@ -129,12 +131,14 @@ class Profile:
 
             p_cl_next = self._update_p_cl(i, T_next, rho_next, p_gas_next, w_ice_next, s_cl_next)
 
-            C_cl_next, C_total_next = self._update_C_cl(i, C_gas_next, w_ice_next, s_cl_next, p_gas_next, p_cl_next, s_op_star_next)
+            C_cl_next, C_total_next = self._update_C_cl(i, rho_next, C_gas_next, w_ice_next, s_cl_next, p_gas_next, p_cl_next, s_op_star_next)
 
             phi_cl_next = self._update_phi_cl(T_next, s_cl_next, p_cl_next, w_ice_next)
             w_air_next = self._update_w_air(T_next, Xi_next, w_ice_next, s_cl_next, p_cl_next, s_op_star_next, COD_idx_next)
 
             phi_op_next = self._update_phi_op(s_op_star_next, w_air_next)
+            x_air_next = self._update_x_air(T_next, rho_next, s_cl_next, p_cl_next)
+            # eta_next = self._update_eta
 
             self.T = T_next
             self.rho = rho_next
@@ -146,10 +150,11 @@ class Profile:
             self.phi_op, self.phi_cl = phi_op_next, phi_cl_next
             self.iez = iez_next
             self.Xi = Xi_next
+            self.x_air = x_air_next
             self.COD_idx, self.rho_COD_bar, self.rho_COD, self.z_COD = COD_idx_next, rho_COD_bar_next, rho_COD_next, z_COD_next
 
             if i % PLOT_INTERVAL == 0:
-                self.plot_state(title=f"t = {self.t[i]:.2f} yr", t=self.t[i])
+                self.plot_state(title=f"t = {self.t[i]:.2f} CE", t=self.t[i])
 
         plt.ioff()
         plt.show()
@@ -185,6 +190,7 @@ class Profile:
 
         F_arr       = np.zeros(self.Nz)
         F_prime_arr = np.zeros(self.Nz)
+        FF_arr = np.zeros(self.Nz)
         for j in range(1, len(next_rho)):
             rho_j = next_rho[j]
             rho_j_upper = next_rho[j - 1]
@@ -202,15 +208,14 @@ class Profile:
 
             F_arr[j]       = F
             F_prime_arr[j] = F_prime
+            FF_arr[j] = F / F_prime
 
-            if np.abs(F_prime) < 1e-5:
-                continue
-            
             next_rho[j] = rho_j - F / F_prime
+            next_rho[j] = np.clip(next_rho[j], self.S.rho_0, rho_ice * (1.0 - 1e-9))
 
         debug = False
         if debug:
-            fig, axes = plt.subplots(1, 2, figsize=(10, 6), sharey=True)
+            fig, axes = plt.subplots(1, 3, figsize=(10, 6), sharey=True)
             axes[0].plot(F_arr, self.z, color='tab:blue')
             axes[0].set_xlabel("F")
             axes[0].set_ylabel("Depth [m]")
@@ -226,6 +231,13 @@ class Profile:
             axes[1].axhline(self.z_COD, color='k', linestyle='--', linewidth=0.8)
             axes[1].axvline(0, color='gray', linestyle='--', linewidth=0.8)
             axes[1].grid(True, linestyle='--', alpha=0.5)
+            
+            axes[2].plot(FF_arr, self.z, color='tab:red')
+            axes[2].set_xlabel("F/F")
+            axes[2].set_ylim(self.z[-1], self.z[0])
+            axes[2].axhline(self.z_COD, color='k', linestyle='--', linewidth=0.8)
+            axes[2].axvline(0, color='gray', linestyle='--', linewidth=0.8)
+            axes[2].grid(True, linestyle='--', alpha=0.5)
 
             fig.suptitle(f't = {self.t[t]:.2f} yr', fontsize=12)
             plt.tight_layout()
@@ -245,7 +257,7 @@ class Profile:
             ρc ∂T/∂t = ∂/∂z(K ∂T/∂z) − ρcw ∂T/∂z
 
         여기서:
-            T(z,t)  = 온도 [°C]
+            T(z,t)  = 온도 [K]
             ρ       = 피른 밀도 [kg/m³]
             c       = 비열 [J/(kg·K)]
             K       = 피른 열전도도 [W/(m·K)] = [kg·m/(s³·K)]
@@ -254,10 +266,10 @@ class Profile:
         ================================================================
         열물성 (Table 1):
         ================================================================
-            K_ice  = 2.22 (1 − 0.0067 T)                        [W/(m·K)]
+            K_ice  = 2.22 (1 − 0.0067 T(C))                        [W/(m·K)]
             K_firn = K_ice (ρ/ρ_ice)^(2 − 0.5 ρ/ρ_ice)         [W/(m·K)]
             c_ice  = 152.5 + 7.122 T[K]                         [J/(kg·K)]
-            (cρ)_firn = c_ice · ρ_firn                          [J/(m³·K)]
+            (cρ)_firn = c_ice · ρ_firn * 0.001                  [J/(m³·K)]
 
         ================================================================
         Conservative form 이산화 (dK/dz 항 자동 포함):
@@ -294,10 +306,10 @@ class Profile:
         rho_ice = self.rho_ice[t + 1]
 
         K_ice = 2.22 * (1 - 0.0067 * (previous_T - C.T0))   # Wm-1K-1
-        K = (K_ice * (previous_rho / rho_ice) ** (2.0 - 0.5 * previous_rho / rho_ice)) # Wm-1K-1
+        K = (K_ice * (previous_rho / rho_ice) ** (2.0 - 0.5 * (previous_rho / rho_ice))) # Wm-1K-1
 
         c_ice = (152.5 + 7.122 * previous_T) #Jkg-1K-1
-        crho_firn = c_ice * previous_rho * (C.m_to_cm ** 3) / C.kg_to_g            #JK-1m-3
+        crho_firn = c_ice * previous_rho # * (C.m_to_cm ** 3) / C.kg_to_g            #JK-1m-3
 
         K_half_temp = 0.5 * (K[:-1] + K[1:])       # K_{i+1/2}, [Nz-1]
         K_half_L = np.empty(self.Nz)             # K_{i-1/2}, [Nz]
@@ -416,7 +428,7 @@ class Profile:
             """
             G = np.zeros(D.shape[0])
             n = 3
-            Q = 6.0E4
+            Q = 6.0E4   #60kJ/mol
             
             # --- Stage 2 계수 (전체 배열) ---
             c_Z = 15.5
@@ -435,7 +447,7 @@ class Profile:
                 + c_Z
             )
             A_creep = 7.89E-15 * np.exp(-Q / (C.R * previous_T))
-            P_star  = 4 * np.pi * P / a_contact / Z / D
+            P_star  = 4 * np.pi * P / a_contact / Z / D #Pa
 
             # --- Stage 1→2 전환 인덱스 ---
             Dms  = D_0 + 0.009
@@ -482,8 +494,8 @@ class Profile:
 
             # --- Stage 3a (D > 0.9) ---
             P_atm = self.p_atm[t]
-            V_c   = (6.95E-4 * T_s - 0.0043) / C.m_to_cm**3 * C.kg_to_g
-            D_c   = 1 / (V_c * self.rho_ice[t] * C.Mg_to_kg + 1)
+            V_c   = (6.95E-4 * T_s - 0.0043) #cm3/g  # / C.m_to_cm**3 * C.kg_to_g
+            D_c   = 1 / (V_c * (self.rho_ice[t] * C.kg_to_Mg) + 1) 
             P_b   = P_atm * (D * (1 - D_c) / D_c / (1 - D))
             P_eff = np.maximum(P + P_atm - P_b, 0.0)
 
@@ -494,26 +506,24 @@ class Profile:
 
             # --- Stage 3b (D > 0.98) ---
             A_creep_3b = 1.2E-3 * np.exp(-Q / (C.R * previous_T))
-            m4 = D > 0.98
+            m4 = D > 0.95
             G[m4] = (9/4) * A_creep_3b[m4] * (1 - D[m4]) * P_eff[m4]
 
             return G, gamma
             
-
-        
         previous_T = self.T.copy()
-        previous_rho = self.rho.copy()  #Mg/m3
-        T_s = self.T_surf[t + 1]        # °C, 다음 시점 표면 온도
+        previous_rho = self.rho.copy()  #kg/m3
+        T_s = self.T_surf[t + 1]        # K, 다음 시점 표면 온도
         rho_ice = self.rho_ice[t + 1]
         D = previous_rho / rho_ice    # 0-dim
         D[D >= 1.0 - 1E-9] = 1.0 - 1E-9
 
         P = np.zeros(self.Nz)   #Pa
         for i in range(1, self.Nz):
-            P[i] = np.trapz(previous_rho[:i + 1], self.z[:i + 1]) * C.g * C.Mg_to_kg
+            P[i] = np.trapz(previous_rho[:i + 1], self.z[:i + 1]) * C.g# * C.Mg_to_kg
         
         # --- D_0: Stage 1→2 전환 밀도 (Eq. A2) ---
-        D_0 = min(0.00226 * T_s + 0.647, 0.56)
+        D_0 = min(0.00226 * (T_s - C.T0) + 0.647, 0.56)
 
         # gamma = 1.60228E-9
         gamma = 0.5 / C.year_to_sec
@@ -525,7 +535,9 @@ class Profile:
         ind1 = np.argmax(D >= Dms)
 
         G, gamma = D_dot(D, P, gamma, previous_T, D_0, T_s)
-        G_grad = np.gradient(G, D)
+        dG_dz = np.gradient(G, self.z)
+        dD_dz = np.gradient(D, self.z)
+        G_grad = np.where(np.abs(dD_dz) > 1e-15, dG_dz / dD_dz, 0.0)
         G_grad[np.isnan(G_grad)] = 0.0
 
         ##############################################################
@@ -535,7 +547,7 @@ class Profile:
 
             z_stage12 = self.z[ind1]
             z_stage23 = self.z[D > 0.9][0]  if np.any(D > 0.9)  else self.z[-1]
-            z_stage3b = self.z[D > 0.98][0] if np.any(D > 0.98) else self.z[-1]
+            z_stage3b = self.z[D > 0.95][0] if np.any(D > 0.95) else self.z[-1]
 
             for ax, x, xlabel in zip(axes,
                                     [G,  G_grad,          D,                     P],
@@ -543,7 +555,7 @@ class Profile:
                 ax.plot(x, self.z, color='tab:blue')
                 ax.axhline(z_stage12, color='tab:orange', linestyle='--', linewidth=0.8, label=f'Stage1→2 (D={D[ind1]:.3f})')
                 ax.axhline(z_stage23, color='tab:green',  linestyle='--', linewidth=0.8, label='Stage2→3a (D=0.9)')
-                ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.98)')
+                ax.axhline(z_stage3b, color='tab:red',    linestyle='--', linewidth=0.8, label='Stage3a→3b (D=0.95)')
                 ax.axhline(self.z_COD, color='k',         linestyle='--', linewidth=0.8, label='COD')
                 ax.set_xlabel(xlabel)
                 ax.set_ylabel('Depth [m]')
@@ -827,7 +839,9 @@ class Profile:
         return C_op, C_gas
 
     def _update_rho_COD_bar(self, t):
-        return 1 / (1 / self.rho_ice[t + 1] + 6.95E-4 * self.T_surf[t + 1] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        rho_COD_bar = 1 / (1 / (self.rho_ice[t + 1] * C.kg_to_Mg) + 6.95E-4 * self.T_surf[t + 1] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        rho_COD_bar *= C.Mg_to_kg
+        return rho_COD_bar
 
     def _update_s(self, t, rho):
         return 1 - rho / self.rho_ice[t + 1]
@@ -868,10 +882,10 @@ class Profile:
         # --- eff_strain ---
         rho_prev   = np.interp(z_prev, self.z, self.rho, left=self.S.rho_0)
         eff_strain = -(rho - rho_prev) / rho_prev
-
-        # --- ξ ---
-        zeta = T_ratio / (1.0 + eff_strain)
-        zeta = np.maximum(zeta, 1.0)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+        # # --- ξ ---
+        # zeta = T_ratio / (1.0 + eff_strain)
+        # zeta = np.maximum(zeta, 1.0)
 
         # --- p_cl_adv: z_prev < 0이면 p_op[0] (표면 대기압) ---
         p_cl_prev = np.interp(z_prev, self.z, self.p_cl, left=self.p_atm[t + 1])
@@ -880,12 +894,18 @@ class Profile:
         s_cl_prev = np.interp(z_prev, self.z, self.s_cl, left=0.0)
 
         # --- 신규 트래핑 ---
-        ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
+        s_prev = 1 - rho_prev / self.rho_ice[t]
+        s_cl_prev_compressed = s_cl_prev - (rho - rho_prev) / self.rho_ice[t] \
+                            * (s_cl_prev / s_prev)
+        ds_cl_new = np.maximum(s_cl - s_cl_prev_compressed, 0.0)
+        ds_cl_new[self.COD_idx:] = 0.0
+        # ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
 
-        # --- p_cl 업데이트 ---
-        num = p_cl_prev * zeta * s_cl_prev + p_gas * ds_cl_new
-        den = s_cl_prev + ds_cl_new + 1E-30
+        p_cl_old = p_cl_prev * (s_cl_prev / (s_cl_prev_compressed + 1E-30)) \
+           * (rho / rho_prev) * T_ratio
 
+        num = p_cl_old * s_cl_prev_compressed + p_gas * ds_cl_new
+        den = s_cl_prev_compressed + ds_cl_new + 1E-30
         p_cl = num / den
 
         # 물리 제약
@@ -928,7 +948,7 @@ class Profile:
 
         return w_air
 
-    def _update_C_cl(self, t, C_gas, w_ice, s_cl, p_gas, p_cl, s_op_star):
+    def _update_C_cl(self, t, rho, C_gas, w_ice, s_cl, p_gas, p_cl, s_op_star):
         """
         C_cl = Σ(Ci·Pi·s_cl_i) / Σ(Pi·s_cl_i)   (몰수 가중 평균)
         """
@@ -947,7 +967,12 @@ class Profile:
         p_cl_prev = np.interp(z_prev, self.z, self.p_cl,  left=self.p_atm[t + 1])
 
         # --- 신규 트래핑 ---
-        ds_cl_new = np.maximum(s_cl - s_cl_prev, 0.0)
+        rho_prev  = np.interp(z_prev, self.z, self.rho, left=self.S.rho_0)
+        s_prev    = 1 - rho_prev / self.rho_ice[t]
+        ds_cl_compression = (rho - rho_prev) / self.rho_ice[t] * (s_cl_prev / s_prev)
+        s_cl_prev_compressed = s_cl_prev - ds_cl_compression
+        ds_cl_new = np.maximum(s_cl - s_cl_prev_compressed, 0.0)
+        ds_cl_new[self.COD_idx:] = 0.0
 
         # --- C_cl 업데이트 (몰수 = P·s_cl 가중) ---
         # 기존: Ci 불변, Pi→Pi·ξ, s_cl_i 불변 → Pi·s_cl_i = p_cl_prev·s_cl_prev·ξ
@@ -967,6 +992,13 @@ class Profile:
 
         return C_cl, C_total
 
+    def _update_x_air(self, T, rho, s_cl, p_cl):
+        x_air = s_cl / rho * (C.T0 / T) * (p_cl / C.P0)
+        return x_air
+
+    # def _update_eta(self):
+
+
     def _init_T_surf(self):
         T_surf = np.interp(self.t, self.S.T_surf[:, 0], self.S.T_surf[:, 1])
         return T_surf
@@ -983,6 +1015,7 @@ class Profile:
     def _init_rho_ice(self):
         T_surf = self.T_surf - C.T0
         rho_ice = 0.9165 - T_surf * 1.4438E-4 - T_surf ** 2 * 1.5175E-7
+        rho_ice *= C.Mg_to_kg
         return rho_ice
 
     def _init_A_ieq(self):
@@ -1032,15 +1065,20 @@ class Profile:
             rho_deep = self.S.rho_ice * Z_1 / (1 + Z_1)
 
             # z_crit_idx = np.argmin(np.abs(rho_deep - rho_shallow))
-            return np.concatenate((rho_shallow, rho_deep))
+            rho = np.concatenate((rho_shallow, rho_deep))
+            rho *= C.Mg_to_kg
+            return rho
             # return np.concatenate((rho_shallow[:z_crit_idx], rho_deep[z_crit_idx:]))
         else:
             rho = np.loadtxt(C.ROOT+"icecores\\"+self.S.name+"\\density_smoothed.txt")
             rho = np.interp(self.z, rho[:, 0], rho[:, 1])
+            rho *= C.Mg_to_kg
             return rho
 
     def _init_rho_COD_bar(self):
-        return 1 / (1 / self.rho_ice[0] + 6.95E-4 * self.T_surf[0] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        rho_COD_bar = 1 / (1 / (self.rho_ice[0] * C.kg_to_Mg) + 6.95E-4 * self.T_surf[0] - 4.3E-2)    #Martinerie et al., 1994, Mitchell et al., 2015
+        rho_COD_bar *= C.Mg_to_kg
+        return rho_COD_bar
 
     def _init_D_X_0(self):
         D_CO2_0 = 5.75E-10 * self.T[:self.M] ** 1.81 * (C.P0 / self.p_gas)
@@ -1087,15 +1125,16 @@ class Profile:
         # self.rho_COD = 1 / (1 - 1 / 75) / (1 / C.kg_to_g / self.S.rho_ice + 7.02E-7 * self.S.T - 4.5E-5) / C.kg_to_g 
         # self.rho_COD = 75 / 74 / (1 / self.S.rho_ice + self.S.T * 6.95E-4 - 4.3E-2)
         rho_COD = self.rho[COD_idx]
+        rho_COD *= C.Mg_to_kg
         z_COD = self.z[COD_idx]
         return COD_idx, rho_COD, z_COD
     
-    def _init_rho_LID(self):
-        return self.rho_COD - 0.01 #Kahel et al., 2021  #0.014    #Blunier et al., 2000
+    # def _init_rho_LID(self):
+    #     return self.rho_COD - 10 #Kahel et al., 2021  #0.014    #Blunier et al., 2000
 
-    def _init_z_LID(self):
-        LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
-        return self.z[LID_idx]
+    # def _init_z_LID(self):
+    #     LID_idx = np.argmin(np.abs(self.rho - self.rho_LID))
+    #     return self.z[LID_idx]
 
     def _init_iez(self):
         iez = np.zeros(self.Nz)
@@ -1163,11 +1202,16 @@ class Profile:
             else:
                 p_cl[i] = self.p_gas[i]
 
-        # COD 이후
-        p_cl_z_COD = p_cl[self.COD_idx]
-        for i in range(self.COD_idx + 1, self.Nz):
-            zeta     = self.rho[self.COD_idx] / self.rho[i]
-            p_cl[i] = p_cl_z_COD / zeta
+        # # COD 이후
+        # p_cl_z_COD = p_cl[self.COD_idx]
+        # for i in range(self.COD_idx + 1, self.Nz):
+        #     zeta     = self.rho[self.COD_idx] / self.rho[i]
+        #     p_cl[i] = p_cl_z_COD / zeta
+
+        p_cl[self.COD_idx:] = p_cl[self.COD_idx] \
+        * (self.s_cl[self.COD_idx] / self.s_cl[self.COD_idx:]) \
+        * (self.rho[self.COD_idx:] / self.rho[self.COD_idx]) \
+        * (self.T[self.COD_idx:] / self.T[self.COD_idx])
 
         p_cl[0] = self.p_op[0]
         p_cl[:self.M]    = np.maximum(p_cl[:self.M], self.p_gas)
@@ -1193,7 +1237,9 @@ class Profile:
         return self.s_cl * (self.p_cl / C.P0) * (C.T0 / self.T) * self.w_ice
     ##############CIC Model######################
     def _init_x_air(self):
-        return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.T0) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
+        x_air = self.s_cl / self.rho * (C.T0 / self.T) * (self.p_cl / C.P0)
+        return x_air
+        # return (self.s_cl[self.COD_idx] * self.p_cl[self.COD_idx] * C.T0) / (self.T_surf[0] * C.P0 * self.rho[self.COD_idx])
 
     def _init_eta(self):
         eta = np.zeros(self.Nz)
@@ -1227,7 +1273,7 @@ class Profile:
                 ax.set_xlim(new_xlim)
 
             ax.axhline(self.z_COD, color="k",    linestyle="--", linewidth=0.8, label="COD")
-            ax.axhline(self.z_LID, color="gray", linestyle="--", linewidth=0.8, label="LID")
+            # ax.axhline(self.z_LID, color="gray", linestyle="--", linewidth=0.8, label="LID")
             ax.legend(fontsize=6, loc="lower right")
             ax.grid(True, linestyle="--", alpha=0.5)
 
@@ -1237,12 +1283,13 @@ class Profile:
 
         _plot(axes[1],
             [(self.rho, "ρ",   "tab:brown")],
-            "ρ [Mg/m³]")
+            "ρ [kg/m³]")
 
         _plot(axes[2],
             [(p_op_plot, "p_op", "tab:blue"),
             (self.p_cl, "p_cl", "tab:orange")],
             "Pressure [Pa]")
+        axes[2].set_xscale('log')
 
         _plot(axes[3],
             [(self.s_op, "s_op", "tab:green"),
@@ -1252,7 +1299,7 @@ class Profile:
         _plot(axes[4],
             [(self.w_ice, "w_ice", "tab:blue"),
             (self.w_air, "w_air", "tab:cyan")],
-            "Velocity [m/yr]")
+            "Velocity [m/s]")
 
         _plot(axes[5],
             [(self.phi_op, "φ_op", "tab:blue"),
@@ -1264,10 +1311,14 @@ class Profile:
             (self.C_cl,    "C_cl",    "tab:orange"),
             (self.C_total, "C_total", "tab:green")],
             "Concentration [ppm]")
+        
+        _plot(axes[7],
+            [(self.x_air * 1000, "x_air",   "tab:blue")],
+            "Air Content [ml/g@STP]")
 
     def plot_state(self, title="", t=None):
         if not hasattr(self, '_fig') or not plt.fignum_exists(self._fig.number):
-            self._fig, self._axes = plt.subplots(1, 7, figsize=(18, 8), sharey=True)
+            self._fig, self._axes = plt.subplots(1, 8, figsize=(18, 8), sharey=True)
         self._fig.suptitle(title, fontsize=13)
         self._plot_axes(self._axes)
         plt.tight_layout()
@@ -1278,7 +1329,7 @@ class Profile:
                 vline.set_xdata([t, t])
             self._bc_fig.canvas.draw_idle()
 
-        plt.pause(0.01)
+        plt.pause(0.001)
 
     def _Delta(self, depth):
         def delta(C_):
@@ -1419,4 +1470,5 @@ class Profile:
         self._bc_fig = fig
 
         plt.tight_layout()
-        plt.pause(0.01)
+        plt.pause(0.001)
+        # plt.show(block=True)

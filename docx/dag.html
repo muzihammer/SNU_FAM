@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Init DAG Editor</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --bg2: #242424;
+    --bg3: #2e2e2e;
+    --border: #3a3a3a;
+    --text: #e0e0e0;
+    --text2: #999;
+    --accent: #4a9eff;
+    --grid: #2a2a2a;
+    --grid-dot: #3d3d3d;
+    --panel-w: 240px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--panel-w);
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-track { background: transparent; }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  #sidebar h2 {
+    padding: 14px 14px 10px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text2);
+    border-bottom: 1px solid var(--border);
+  }
+  #node-list {
+    overflow-y: visible;
+    padding: 8px;
+    flex-shrink: 0;
+  }
+  #node-list::-webkit-scrollbar { width: 4px; }
+  #node-list::-webkit-scrollbar-track { background: transparent; }
+  #node-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .node-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .node-item:hover { background: var(--bg3); }
+  .node-item.selected { background: #1e3a5f; }
+  .node-item .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .node-item .label { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node-item .vis-btn {
+    width: 18px; height: 18px; border-radius: 3px; border: none;
+    background: transparent; color: var(--text2); cursor: pointer;
+    font-size: 13px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .node-item .vis-btn:hover { color: var(--text); }
+  .node-item.hidden .label { opacity: 0.35; text-decoration: line-through; }
+
+  /* ── Add/Edit panel ── */
+  #edit-panel {
+    border-top: 1px solid var(--border);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #edit-panel h3 { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
+  .form-row { display: flex; gap: 6px; align-items: center; }
+  .form-row label { font-size: 11px; color: var(--text2); width: 44px; flex-shrink: 0; }
+  .form-row input[type=text] {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 6px; border-radius: 3px; font-size: 12px; font-family: inherit;
+  }
+  .form-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .color-swatches { display: flex; gap: 4px; flex-wrap: wrap; }
+  .swatch {
+    width: 20px; height: 20px; border-radius: 3px; cursor: pointer;
+    border: 2px solid transparent; transition: border-color 0.1s;
+  }
+  .swatch.active { border-color: #fff; }
+  .btn { padding: 5px 10px; border-radius: 3px; border: none; cursor: pointer; font-size: 12px; font-family: inherit; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-danger  { background: #c0392b; color: #fff; }
+  .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+  .btn:hover { opacity: 0.85; }
+
+  /* ── Edge panel ── */
+  #edge-panel {
+    border-top: 1px solid var(--border);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  #edge-panel h3 { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
+  .edge-form { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+  .edge-form select {
+    width: 80px; min-width: 0; background: var(--bg3); border: 1px solid var(--border);
+    color: var(--text); padding: 3px 5px; border-radius: 3px; font-size: 11px; font-family: inherit;
+  }
+  .edge-form .add-btn { flex-shrink: 0; }
+  #edge-list { overflow-y: auto; max-height: 80px; display: flex; flex-direction: column; gap: 2px; }
+  .edge-entry {
+    display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text2);
+    padding: 2px 4px; border-radius: 3px;
+  }
+  .edge-entry:hover { background: var(--bg3); }
+  .edge-entry span { flex: 1; }
+  .edge-del { background: none; border: none; color: #c0392b; cursor: pointer; font-size: 13px; line-height: 1; }
+
+  /* ── Legend ── */
+  #legend-panel {
+    border-top: 1px solid var(--border);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  #legend-panel h3 { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text2); }
+  .legend-item {
+    display: flex; align-items: center; gap: 7px; font-size: 11px;
+  }
+  .legend-swatch {
+    width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.15);
+  }
+  .legend-name { color: var(--text2); }
+
+  /* ── Canvas ── */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: auto;
+  }
+  #canvas-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  #canvas-wrap::-webkit-scrollbar-track { background: transparent; }
+  #canvas-wrap::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+  #canvas-bg {
+    position: absolute; top: 0; left: 0;
+    width: 4000px; height: 4000px;
+    background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: 14px 14px;
+    pointer-events: none;
+  }
+  #canvas-svg {
+    position: absolute; top: 0; left: 0;
+    width: 4000px; height: 4000px;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .dag-node {
+    position: absolute;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: grab;
+    user-select: none;
+    white-space: nowrap;
+    border: 1px solid rgba(255,255,255,0.18);
+    z-index: 2;
+    transition: box-shadow 0.15s;
+  }
+  .dag-node:active { cursor: grabbing; z-index: 10; }
+  .dag-node.selected { box-shadow: 0 0 0 2px #fff; }
+  .dag-node.hidden { opacity: 0.15; pointer-events: none; }
+
+  /* ── Tooltip ── */
+  #tooltip {
+    position: fixed;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #e0e0e0;
+    pointer-events: none;
+    z-index: 100;
+    max-width: 220px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    display: none;
+  }
+  #tooltip .tt-label { font-size: 13px; font-weight: bold; margin-bottom: 6px; }
+  #tooltip .tt-row { display: flex; gap: 6px; }
+  #tooltip .tt-key { color: #666; width: 60px; flex-shrink: 0; }
+  #tooltip .tt-val { color: #ccc; }
+  #tooltip .tt-desc { margin-top: 6px; padding-top: 6px; border-top: 1px solid #333; color: #aaa; font-style: italic; }
+  #tooltip .tt-edge-hint { margin-top: 6px; padding-top: 6px; border-top: 1px solid #333; display: flex; gap: 10px; font-size: 10px; }
+  #tooltip .tt-out { color: #4a9eff; }
+  #tooltip .tt-in  { color: #ff7043; }
+
+  /* ── Tooltip edit overlay ── */
+  #info-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center; z-index: 200;
+  }
+  #info-overlay.open { display: flex; }
+  #info-box {
+    background: #242424; border: 1px solid #444; border-radius: 8px;
+    padding: 18px; width: 300px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #info-box h3 { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #666; }
+  #info-box input, #info-box textarea {
+    background: #2e2e2e; border: 1px solid #3a3a3a; color: #e0e0e0;
+    padding: 5px 8px; border-radius: 4px; font-size: 12px; font-family: inherit;
+    width: 100%;
+  }
+  #info-box textarea { resize: vertical; min-height: 60px; }
+  #info-box input:focus, #info-box textarea:focus { outline: none; border-color: #4a9eff; }
+  #info-box .row { display: flex; gap: 4px; align-items: center; }
+  #info-box .row label { font-size: 11px; color: #666; width: 56px; flex-shrink: 0; }
+
+  /* toolbar */
+  #toolbar {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; gap: 6px; z-index: 20;
+  }
+  #toolbar .btn { font-size: 11px; padding: 4px 9px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>노드 목록</h2>
+  <div id="node-list"></div>
+
+  <div id="edit-panel">
+    <h3 id="edit-title">새 노드 추가</h3>
+    <div class="form-row">
+      <label>이름</label>
+      <input type="text" id="inp-label" placeholder="변수명">
+    </div>
+    <div class="form-row">
+      <label>색상</label>
+      <div class="color-swatches" id="swatches"></div>
+    </div>
+    <div class="form-row" id="new-color-row" style="display:none;flex-wrap:wrap;gap:4px;align-items:center">
+      <label style="font-size:10px;width:44px">배경</label>
+      <input type="color" id="inp-bg" value="#2a4a6e" style="width:28px;height:22px;border:none;background:none;cursor:pointer;padding:0">
+      <label style="font-size:10px">글자</label>
+      <input type="color" id="inp-fg" value="#a8d4f5" style="width:28px;height:22px;border:none;background:none;cursor:pointer;padding:0">
+      <input type="text" id="inp-catname" placeholder="이름" style="width:60px;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:3px 5px;border-radius:3px;font-size:11px;font-family:inherit">
+      <button class="btn btn-primary" onclick="addCustomCat()" style="padding:3px 8px;font-size:11px">추가</button>
+    </div>
+    <div class="form-row">
+      <label></label>
+      <button class="btn btn-secondary" onclick="toggleNewColor()" id="btn-new-color" style="font-size:10px;padding:3px 8px">+ 색상 추가</button>
+    </div>
+    <div class="form-row" style="gap:6px">
+      <button class="btn btn-primary" id="btn-add" onclick="addOrUpdateNode()">추가</button>
+      <button class="btn btn-danger"  id="btn-del" onclick="deleteSelected()" style="display:none">삭제</button>
+      <button class="btn btn-secondary" onclick="clearSelection()">취소</button>
+    </div>
+  </div>
+
+  <div id="edge-panel">
+    <h3>엣지 추가</h3>
+    <div class="edge-form">
+      <select id="sel-from"></select>
+      <span style="color:var(--text2);font-size:14px">→</span>
+      <select id="sel-to"></select>
+      <button class="btn btn-primary add-btn" onclick="addEdge()" style="padding:3px 8px;font-size:13px;flex-shrink:0">+</button>
+    </div>
+    <div id="edge-list"></div>
+  </div>
+</div>
+
+<div id="tooltip">
+  <div class="tt-label" id="tt-label"></div>
+  <div class="tt-row"><span class="tt-key">차원</span><span class="tt-val" id="tt-dim">-</span></div>
+  <div class="tt-row"><span class="tt-key">단위</span><span class="tt-val" id="tt-unit">-</span></div>
+  <div class="tt-row" id="tt-eq-row" style="display:none"><span class="tt-key">수식</span><span class="tt-val" id="tt-eq">-</span></div>
+  <div class="tt-row" id="tt-ref-row" style="display:none"><span class="tt-key">참고</span><span class="tt-val" id="tt-ref">-</span></div>
+  <div class="tt-desc" id="tt-desc" style="display:none"></div>
+  <div class="tt-edge-hint">
+    <span class="tt-out">→ 출력</span>
+    <span class="tt-in">→ 입력</span>
+  </div>
+</div>
+
+<div id="info-overlay">
+  <div id="info-box">
+    <h3 id="info-title">노드 정보 편집</h3>
+    <div class="row"><label>차원</label><input type="text" id="inp-dim" placeholder="예: [Nz]"></div>
+    <div class="row"><label>단위</label><input type="text" id="inp-unit" placeholder="예: kg/m³"></div>
+    <div class="row"><label>수식</label><input type="text" id="inp-eq" placeholder="예: 1 - ρ/ρ_ice"></div>
+    <div class="row"><label>참고</label><input type="text" id="inp-ref" placeholder="예: Goujon 2003 Eq.5"></div>
+    <div class="row" style="align-items:flex-start"><label style="padding-top:4px">설명</label><textarea id="inp-desc" placeholder="변수 설명 (선택)"></textarea></div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-primary" onclick="saveInfo()" style="flex:1">저장</button>
+      <button class="btn btn-secondary" onclick="closeInfo()">취소</button>
+    </div>
+  </div>
+
+  <div id="legend-panel">
+    <h3>범례</h3>
+    <div id="legend-list"></div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <div id="canvas-bg"></div>
+  <svg id="canvas-svg">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="#555" stroke="none"/>
+      </marker>
+      <marker id="arr-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="#4a9eff" stroke="none"/>
+      </marker>
+      <marker id="arr-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M1 1L9 5L1 9" fill="#ff7043" stroke="none"/>
+      </marker>
+    </defs>
+  </svg>
+  <div id="toolbar">
+    <button class="btn btn-secondary" onclick="exportJSON()">JSON 내보내기</button>
+    <button class="btn btn-secondary" onclick="importJSON()">JSON 가져오기</button>
+  </div>
+</div>
+
+<script>
+const GRID = 28;
+const CATS = [
+  { id:'gray',         bg:'#444',    color:'#eee' },
+  { id:'teal',         bg:'#0d5e49', color:'#9fe1cb' },
+  { id:'purple',       bg:'#3a3080', color:'#cecbf6' },
+  { id:'blue',         bg:'#0d3f6e', color:'#b5d4f4' },
+  { id:'coral',        bg:'#7a2a18', color:'#f5c4b3' },
+  { id:'amber',        bg:'#6b3e08', color:'#fac775' },
+  { id:'custom-cyan',  bg:'#0a4a52', color:'#7fe0ea', _custom:true },
+  { id:'custom-green', bg:'#1a4a1a', color:'#7eda7e', _custom:true },
+  { id:'custom-pink',  bg:'#5a1a3a', color:'#f0a0cc', _custom:true },
+];
+
+let nodes = [], edges = [], selectedId = null, selectedCat = 'gray';
+
+const defaultData = {
+  "nodes": [
+    {
+      "id": "n-Ts",
+      "label": "T_surf",
+      "cat": "teal",
+      "x": 2,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nt]",
+      "unit": "K",
+      "eq": "interp(t, S.T_surf)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-Tb",
+      "label": "T_basal",
+      "cat": "teal",
+      "x": 6,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nt]",
+      "unit": "K",
+      "eq": "interp(t, S.T_basal)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-Ai",
+      "label": "A_ieq",
+      "cat": "teal",
+      "x": 10,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nt]",
+      "unit": "m/s",
+      "eq": "interp(t, S.A_ieq)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-pa",
+      "label": "p_atm",
+      "cat": "teal",
+      "x": 14,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nt]",
+      "unit": "Pa",
+      "eq": "interp(t, S.p_atm)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-Ca",
+      "label": "C_atm",
+      "cat": "teal",
+      "x": 18,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nt]",
+      "unit": "ppm",
+      "eq": "interp(t, S.C_atm)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-tDZ",
+      "label": "tau_inv_DZ",
+      "cat": "teal",
+      "x": 26,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "interp(z, file)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-tLIZ",
+      "label": "tau_inv_LIZ",
+      "cat": "teal",
+      "x": 31,
+      "y": 3,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "interp(z, file)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-T",
+      "label": "T",
+      "cat": "purple",
+      "x": 2,
+      "y": 6,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "K",
+      "eq": "linear(T_surf, T_basal)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-rho",
+      "label": "rho",
+      "cat": "blue",
+      "x": 6,
+      "y": 6,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "kg/m³",
+      "eq": "interp(z, file)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-s",
+      "label": "s",
+      "cat": "blue",
+      "x": 6,
+      "y": 9,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "1 - ρ/ρ_ice",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-scl",
+      "label": "s_cl",
+      "cat": "blue",
+      "x": 6,
+      "y": 12,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "0.37·s·(s/s_co_bar)^-7.6",
+      "ref": "Goujon 2003",
+      "desc": ""
+    },
+    {
+      "id": "n-iez",
+      "label": "iez",
+      "cat": "gray",
+      "x": 22,
+      "y": 9,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m_ice",
+      "eq": "∫ρ dz / ρ_ice",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-Xi",
+      "label": "Xi",
+      "cat": "gray",
+      "x": 22,
+      "y": 12,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "1 - iez/H",
+      "ref": "Nye model",
+      "desc": ""
+    },
+    {
+      "id": "n-wice",
+      "label": "w_ice",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 12,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "A·(ρ_ice/ρ)·(1-iez/H)",
+      "ref": "Nye model",
+      "desc": ""
+    },
+    {
+      "id": "n-sop",
+      "label": "s_op",
+      "cat": "blue",
+      "x": 6,
+      "y": 15,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "s - s_cl",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-pop",
+      "label": "p_op",
+      "cat": "coral",
+      "x": 14,
+      "y": 6,
+      "hidden": false,
+      "dim": "[M]",
+      "unit": "Pa",
+      "eq": "∂p/∂t PDE (Backward Euler)",
+      "ref": "Buizert 2016 Eq.8",
+      "desc": ""
+    },
+    {
+      "id": "n-sstar",
+      "label": "s_op_star",
+      "cat": "blue",
+      "x": 6,
+      "y": 18,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "s_op·(p_op/P0)·(T0/T)",
+      "ref": "Buizert 2011",
+      "desc": ""
+    },
+    {
+      "id": "n-Deddy",
+      "label": "D_eddy",
+      "cat": "custom-green",
+      "x": 31,
+      "y": 6,
+      "hidden": false,
+      "dim": "[M]",
+      "unit": "m²/s",
+      "eq": "D0·exp(-z/H)",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-DX",
+      "label": "D_X",
+      "cat": "custom-green",
+      "x": 26,
+      "y": 6,
+      "hidden": false,
+      "dim": "[M]",
+      "unit": "m²/s",
+      "eq": "D_X_0 · τ_DZ",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-pcl",
+      "label": "p_cl",
+      "cat": "coral",
+      "x": 14,
+      "y": 15,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "Pa",
+      "eq": "p_cl·s_cl·ρ/T = const",
+      "ref": "이상기체 법칙",
+      "desc": ""
+    },
+    {
+      "id": "n-Cop",
+      "label": "C_op",
+      "cat": "custom-pink",
+      "x": 18,
+      "y": 6,
+      "hidden": false,
+      "dim": "[M]",
+      "unit": "ppm",
+      "eq": "Crank-Nicolson PDE",
+      "ref": "Buizert 2011 Eq.5.16",
+      "desc": ""
+    },
+    {
+      "id": "n-Ccl",
+      "label": "C_cl",
+      "cat": "custom-pink",
+      "x": 18,
+      "y": 15,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "ppm",
+      "eq": "mol-weighted avg",
+      "ref": "Buizert 2011",
+      "desc": ""
+    },
+    {
+      "id": "n-wair",
+      "label": "w_air",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 21,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "(φ_COD·ξ/ξ_COD - φ_cl)/s*",
+      "ref": "Buizert 2011 Eq.5.1",
+      "desc": ""
+    },
+    {
+      "id": "n-eta",
+      "label": "eta",
+      "cat": "amber",
+      "x": 18,
+      "y": 45,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "s/m",
+      "eq": "∫ dz/w_ice",
+      "ref": "",
+      "desc": ""
+    },
+    {
+      "id": "n-phop",
+      "label": "phi_op",
+      "cat": "amber",
+      "x": 10,
+      "y": 24,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "s*_op · w_air",
+      "ref": "Buizert 2011 Eq.5.1",
+      "desc": ""
+    },
+    {
+      "id": "n-phcl",
+      "label": "phi_cl",
+      "cat": "amber",
+      "x": 10,
+      "y": 18,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "s_cl·(p_cl/P0)·(T0/T)·w_ice",
+      "ref": "Buizert 2011 Eq.5.2",
+      "desc": ""
+    },
+    {
+      "id": "n-xair",
+      "label": "x_air",
+      "cat": "amber",
+      "x": 2,
+      "y": 18,
+      "hidden": false,
+      "dim": "[Nz]",
+      "unit": "m³/kg",
+      "eq": "s_cl/ρ·(p_cl/P0)·(T0/T)",
+      "ref": "Martinerie 1994",
+      "desc": ""
+    },
+    {
+      "id": "n-1778054093700",
+      "label": "H",
+      "cat": "teal",
+      "x": 22,
+      "y": 3,
+      "hidden": false,
+      "dim": "-",
+      "unit": "mieq",
+      "eq": "",
+      "ref": "",
+      "desc": "Ice Thickness"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n-Ts",
+      "to": "n-T"
+    },
+    {
+      "from": "n-Tb",
+      "to": "n-T"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-s"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-iez"
+    },
+    {
+      "from": "n-s",
+      "to": "n-scl"
+    },
+    {
+      "from": "n-iez",
+      "to": "n-Xi"
+    },
+    {
+      "from": "n-Ai",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-sop"
+    },
+    {
+      "from": "n-pa",
+      "to": "n-pop"
+    },
+    {
+      "from": "n-sop",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-T",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-tLIZ",
+      "to": "n-Deddy"
+    },
+    {
+      "from": "n-tDZ",
+      "to": "n-DX"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-T",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-Ca",
+      "to": "n-Cop"
+    },
+    {
+      "from": "n-sstar",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-Xi",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-eta"
+    },
+    {
+      "from": "n-wair",
+      "to": "n-phop"
+    },
+    {
+      "from": "n-sstar",
+      "to": "n-phop"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-T",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-T",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-s",
+      "to": "n-sop"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-iez",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-T",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-Cop",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-1778054093700",
+      "to": "n-iez"
+    }
+  ]
+};
+const defaultNodes = defaultData.nodes;
+const defaultEdges_raw = defaultData.edges;
+
+const nodeInfo = {
+  'n-Ts':   {dim:'[Nt]',   unit:'K',         eq:'interp(t, S.T_surf)',        ref:''},
+  'n-Tb':   {dim:'[Nt]',   unit:'K',         eq:'interp(t, S.T_basal)',       ref:''},
+  'n-Ai':   {dim:'[Nt]',   unit:'m/s',       eq:'interp(t, S.A_ieq)',         ref:''},
+  'n-pa':   {dim:'[Nt]',   unit:'Pa',        eq:'interp(t, S.p_atm)',         ref:''},
+  'n-Ca':   {dim:'[Nt]',   unit:'ppm',       eq:'interp(t, S.C_atm)',         ref:''},
+  'n-tDZ':  {dim:'[Nz]',   unit:'-',         eq:'interp(z, file)',            ref:''},
+  'n-tLIZ': {dim:'[Nz]',   unit:'-',         eq:'interp(z, file)',            ref:''},
+  'n-ri':   {dim:'[Nt]',   unit:'kg/m³',     eq:'0.9165 - aT - bT²',         ref:'Bader 1964'},
+  'n-T':    {dim:'[Nz]',   unit:'K',         eq:'linear(T_surf, T_basal)',    ref:''},
+  'n-rho':  {dim:'[Nz]',   unit:'kg/m³',     eq:'interp(z, file)',            ref:''},
+  'n-Aw':   {dim:'scalar', unit:'m/s',       eq:'mean(A_ieq) / mean(rho_ice)',ref:''},
+  'n-rcb':  {dim:'scalar', unit:'kg/m³',     eq:'1/(1/ρ_ice + 6.95e-4·T - 0.043)', ref:'Martinerie 1994'},
+  'n-s':    {dim:'[Nz]',   unit:'-',         eq:'1 - ρ/ρ_ice',               ref:''},
+  'n-scl':  {dim:'[Nz]',   unit:'-',         eq:'0.37·s·(s/s_co_bar)^-7.6',  ref:'Goujon 2003'},
+  'n-iez':  {dim:'[Nz]',   unit:'m_ice',     eq:'∫ρ dz / ρ_ice',             ref:''},
+  'n-COD':  {dim:'scalar', unit:'m/kg/m³',   eq:'argmax(s_cl)',               ref:''},
+  'n-Xi':   {dim:'[Nz]',   unit:'-',         eq:'1 - iez/H',                 ref:'Nye model'},
+  'n-wice': {dim:'[Nz]',   unit:'m/s',       eq:'A·(ρ_ice/ρ)·(1-iez/H)',     ref:'Nye model'},
+  'n-sop':  {dim:'[Nz]',   unit:'-',         eq:'s - s_cl',                  ref:''},
+  'n-rLID': {dim:'scalar', unit:'kg/m³',     eq:'rho_COD - 10',              ref:'Kahel 2021'},
+  'n-M':    {dim:'scalar', unit:'index',     eq:'argmin|z-(z_COD+10)|',      ref:''},
+  'n-pop':  {dim:'[M]',    unit:'Pa',        eq:'∂p/∂t PDE (Backward Euler)',ref:'Buizert 2016 Eq.8'},
+  'n-sstar':{dim:'[Nz]',   unit:'-',         eq:'s_op·(p_op/P0)·(T0/T)',     ref:'Buizert 2011'},
+  'n-DX0':  {dim:'[M]',    unit:'m²/s',      eq:'5.75e-10·T^1.81·(P0/p)',    ref:''},
+  'n-zLID': {dim:'scalar', unit:'m',         eq:'z[argmin|ρ-ρ_LID|]',        ref:''},
+  'n-Deddy':{dim:'[M]',    unit:'m²/s',      eq:'D0·exp(-z/H)',               ref:''},
+  'n-DX':   {dim:'[M]',    unit:'m²/s',      eq:'D_X_0 · τ_DZ',             ref:''},
+  'n-pcl':  {dim:'[Nz]',   unit:'Pa',        eq:'p_cl·s_cl·ρ/T = const',     ref:'이상기체 법칙'},
+  'n-Cop':  {dim:'[M]',    unit:'ppm',       eq:'Crank-Nicolson PDE',         ref:'Buizert 2011 Eq.5.16'},
+  'n-Ccl':  {dim:'[Nz]',   unit:'ppm',       eq:'mol-weighted avg',           ref:'Buizert 2011'},
+  'n-wair': {dim:'[Nz]',   unit:'m/s',       eq:'(φ_COD·ξ/ξ_COD - φ_cl)/s*',ref:'Buizert 2011 Eq.5.1'},
+  'n-eta':  {dim:'[Nz]',   unit:'s/m',       eq:'∫ dz/w_ice',                ref:''},
+  'n-phop': {dim:'[Nz]',   unit:'m/s',       eq:'s*_op · w_air',             ref:'Buizert 2011 Eq.5.1'},
+  'n-phcl': {dim:'[Nz]',   unit:'m/s',       eq:'s_cl·(p_cl/P0)·(T0/T)·w_ice', ref:'Buizert 2011 Eq.5.2'},
+  'n-xair': {dim:'[Nz]',   unit:'m³/kg',     eq:'s_cl/ρ·(p_cl/P0)·(T0/T)',  ref:'Martinerie 1994'},
+};
+
+nodes = defaultNodes.map(n => {
+  const info = nodeInfo[n.id] || {};
+  return {dim:'', unit:'', eq:'', ref:'', desc:'', ...info, ...n, hidden: n.hidden ?? false};
+});
+edges = defaultEdges_raw.map(e => typeof e === 'object' ? e : {from:e[0], to:e[1]});
+
+// ── Swatches ──
+function buildSwatches() {
+  const c = document.getElementById('swatches');
+  c.innerHTML = '';
+  CATS.forEach(cat => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+
+    const d = document.createElement('div');
+    d.className = 'swatch' + (cat.id === selectedCat ? ' active' : '');
+    d.style.background = cat.bg;
+    d.style.outline = '1px solid ' + cat.color;
+    d.title = cat.id;
+    d.onclick = () => { selectedCat = cat.id; buildSwatches(); };
+    wrap.appendChild(d);
+
+    if (cat._custom) {
+      const del = document.createElement('div');
+      del.textContent = 'x';
+      del.style.cssText = 'position:absolute;top:-5px;right:-5px;width:12px;height:12px;background:#c0392b;color:#fff;border-radius:50%;font-size:9px;line-height:12px;text-align:center;cursor:pointer;display:none;z-index:5';
+      del.onclick = e => { e.stopPropagation(); deleteCat(cat.id); };
+      wrap.onmouseenter = () => del.style.display = 'block';
+      wrap.onmouseleave = () => del.style.display = 'none';
+      wrap.appendChild(del);
+    }
+    c.appendChild(wrap);
+  });
+}
+
+function toggleNewColor() {
+  const row = document.getElementById('new-color-row');
+  const btn = document.getElementById('btn-new-color');
+  const visible = row.style.display !== 'none';
+  row.style.display = visible ? 'none' : 'flex';
+  btn.textContent = visible ? '+ 색상 추가' : '닫기';
+}
+
+function addCustomCat() {
+  const bg = document.getElementById('inp-bg').value;
+  const fg = document.getElementById('inp-fg').value;
+  const name = document.getElementById('inp-catname').value.trim() || ('c' + Date.now().toString().slice(-4));
+  const id = 'custom-' + name;
+  if (CATS.find(c => c.id === id)) return;
+  CATS.push({ id, bg, color: fg, _custom: true });
+  selectedCat = id;
+  document.getElementById('inp-catname').value = '';
+  buildSwatches();
+  renderLegend();
+}
+
+function deleteCat(id) {
+  const idx = CATS.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  CATS.splice(idx, 1);
+  if (selectedCat === id) selectedCat = CATS[0].id;
+  buildSwatches();
+  renderLegend();
+}
+
+buildSwatches();
+renderLegend();
+
+function renderLegend() {
+  const list = document.getElementById('legend-list');
+  list.innerHTML = '';
+  CATS.forEach(cat => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<div class="legend-swatch" style="background:${cat.bg};border-color:${cat.color}"></div>
+      <span class="legend-name">${cat.id}</span>`;
+    list.appendChild(item);
+  });
+}
+
+// ── Render node list ──
+function renderList() {
+  const list = document.getElementById('node-list');
+  list.innerHTML = '';
+  const selFrom = document.getElementById('sel-from');
+  const selTo = document.getElementById('sel-to');
+  const prevF = selFrom.value, prevT = selTo.value;
+  selFrom.innerHTML = ''; selTo.innerHTML = '';
+
+  nodes.forEach(n => {
+    const cat = CATS.find(c => c.id === n.cat) || CATS[0];
+
+    // sidebar item
+    const item = document.createElement('div');
+    item.className = 'node-item' + (n.hidden ? ' hidden' : '') + (n.id === selectedId ? ' selected' : '');
+    item.innerHTML = `<div class="dot" style="background:${cat.bg};border:1px solid ${cat.color}"></div>
+      <span class="label">${n.label}</span>
+      <button class="vis-btn" title="${n.hidden ? '보이기' : '숨기기'}">${n.hidden ? '○' : '●'}</button>`;
+    item.querySelector('.vis-btn').onclick = e => { e.stopPropagation(); toggleHide(n.id); };
+    item.onclick = () => selectNode(n.id);
+    list.appendChild(item);
+
+    // selects
+    [selFrom, selTo].forEach(sel => {
+      const opt = document.createElement('option');
+      opt.value = n.id; opt.textContent = n.label;
+      sel.appendChild(opt);
+    });
+  });
+
+  selFrom.value = prevF || (nodes[0]?.id || '');
+  selTo.value = prevT || (nodes[1]?.id || '');
+  renderEdgeList();
+}
+
+function renderEdgeList() {
+  const el = document.getElementById('edge-list');
+  el.innerHTML = '';
+  edges.forEach((e, i) => {
+    const fn = nodes.find(n => n.id === e.from), tn = nodes.find(n => n.id === e.to);
+    if (!fn || !tn) return;
+    const div = document.createElement('div');
+    div.className = 'edge-entry';
+    div.innerHTML = `<span>${fn.label} → ${tn.label}</span>
+      <button class="edge-del" onclick="removeEdge(${i})">×</button>`;
+    el.appendChild(div);
+  });
+}
+
+// ── Canvas nodes ──
+function renderCanvas() {
+  const wrap = document.getElementById('canvas-wrap');
+  document.querySelectorAll('.dag-node').forEach(el => el.remove());
+  nodes.forEach(n => {
+    const cat = CATS.find(c => c.id === n.cat) || CATS[0];
+    const el = document.createElement('div');
+    el.className = 'dag-node' + (n.hidden ? ' hidden' : '') + (n.id === selectedId ? ' selected' : '');
+    el.id = 'dn-' + n.id;
+    el.textContent = n.label;
+    el.style.background = cat.bg;
+    el.style.color = cat.color;
+    el.style.left = (n.x * GRID) + 'px';
+    el.style.top  = (n.y * GRID) + 'px';
+    el.onclick = () => selectNode(n.id);
+    el.addEventListener('dblclick', e => { e.stopPropagation(); openInfo(n.id); });
+    el.addEventListener('mouseenter', e => showTooltip(e, n));
+    el.addEventListener('mousemove',  e => moveTooltip(e));
+    el.addEventListener('mouseleave', hideTooltip);
+    makeDraggable(el, n);
+    wrap.appendChild(el);
+  });
+  redrawEdges();
+}
+
+function makeDraggable(el, nodeData) {
+  let sx, sy, ox, oy;
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    sx = e.clientX; sy = e.clientY;
+    ox = nodeData.x * GRID; oy = nodeData.y * GRID;
+    const onMove = e => {
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      const rawX = ox + dx, rawY = oy + dy;
+      nodeData.x = Math.round(rawX / GRID);
+      nodeData.y = Math.round(rawY / GRID);
+      el.style.left = (nodeData.x * GRID) + 'px';
+      el.style.top  = (nodeData.y * GRID) + 'px';
+      redrawEdges();
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+// ── Edges ──
+const svgEl = document.getElementById('canvas-svg');
+const edgePaths = {};
+
+function redrawEdges() {
+  // remove old
+  svgEl.querySelectorAll('.edge-path').forEach(p => p.remove());
+  edges.forEach((e, i) => {
+    const sEl = document.getElementById('dn-' + e.from);
+    const tEl = document.getElementById('dn-' + e.to);
+    if (!sEl || !tEl) return;
+    const sn = nodes.find(n => n.id === e.from);
+    const tn = nodes.find(n => n.id === e.to);
+    if (sn?.hidden || tn?.hidden) return;
+
+    const sx = sEl.offsetLeft + sEl.offsetWidth/2;
+    const sy = sEl.offsetTop  + sEl.offsetHeight/2;
+    const tx = tEl.offsetLeft + tEl.offsetWidth/2;
+    const ty = tEl.offsetTop  + tEl.offsetHeight/2;
+
+    // 끝점을 target 노드 테두리로 이동
+    const dx = tx - sx, dy = ty - sy;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    const hw = tEl.offsetWidth/2 + 2, hh = tEl.offsetHeight/2 + 2;
+    const tBound = Math.min(Math.abs(hw / (dx/len || 0.001)), Math.abs(hh / (dy/len || 0.001)));
+    const ex = tx - (dx/len) * Math.min(tBound, len * 0.45);
+    const ey = ty - (dy/len) * Math.min(tBound, len * 0.45);
+
+    // 곡선 제어점 (수직 방향 오프셋)
+    const mx = (sx+ex)/2, my = (sy+ey)/2;
+    const perp = Math.min(20, len * 0.15);
+    const cx = mx + (-(ey-sy)/len) * perp;
+    const cy = my + ((ex-sx)/len) * perp;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('class','edge-path');
+    path.setAttribute('data-from', e.from);
+    path.setAttribute('data-to', e.to);
+    path.setAttribute('d', `M${sx},${sy} Q${cx},${cy} ${ex},${ey}`);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke','#555');
+    path.setAttribute('stroke-width','1');
+    path.setAttribute('opacity','0.5');
+    path.setAttribute('marker-end','url(#arr)');
+    svgEl.appendChild(path);
+  });
+}
+
+// ── Node actions ──
+function selectNode(id) {
+  selectedId = id;
+  const n = nodes.find(n => n.id === id);
+  if (n) {
+    document.getElementById('inp-label').value = n.label;
+    selectedCat = n.cat;
+    buildSwatches();
+    document.getElementById('edit-title').textContent = '노드 편집';
+    document.getElementById('btn-add').textContent = '수정';
+    document.getElementById('btn-del').style.display = '';
+  }
+  renderList();
+  renderCanvas();
+}
+
+function clearSelection() {
+  selectedId = null;
+  document.getElementById('inp-label').value = '';
+  document.getElementById('edit-title').textContent = '새 노드 추가';
+  document.getElementById('btn-add').textContent = '추가';
+  document.getElementById('btn-del').style.display = 'none';
+  renderList();
+  renderCanvas();
+}
+
+function addOrUpdateNode() {
+  const label = document.getElementById('inp-label').value.trim();
+  if (!label) return;
+  if (selectedId) {
+    const n = nodes.find(n => n.id === selectedId);
+    if (n) { n.label = label; n.cat = selectedCat; }
+  } else {
+    const id = 'n-' + Date.now();
+    nodes.push({ id, label, cat: selectedCat, x: 5, y: 5, hidden: false, dim:'', unit:'', eq:'', ref:'', desc:'' });
+  }
+  clearSelection();
+  renderList();
+  renderCanvas();
+}
+
+function deleteSelected() {
+  if (!selectedId) return;
+  nodes = nodes.filter(n => n.id !== selectedId);
+  edges = edges.filter(e => e.from !== selectedId && e.to !== selectedId);
+  clearSelection();
+  renderList();
+  renderCanvas();
+}
+
+function toggleHide(id) {
+  const n = nodes.find(n => n.id === id);
+  if (n) n.hidden = !n.hidden;
+  renderList();
+  renderCanvas();
+}
+
+function addEdge() {
+  const from = document.getElementById('sel-from').value;
+  const to = document.getElementById('sel-to').value;
+  if (!from || !to || from === to) return;
+  if (edges.find(e => e.from === from && e.to === to)) return;
+  edges.push({from, to});
+  renderEdgeList();
+  redrawEdges();
+}
+
+function removeEdge(i) {
+  edges.splice(i, 1);
+  renderEdgeList();
+  redrawEdges();
+}
+
+// ── Import/Export ──
+function exportJSON() {
+  const data = JSON.stringify({nodes, edges}, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dag.json';
+  a.click();
+}
+
+function importJSON() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json';
+  inp.onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        nodes = (d.nodes || nodes).map(n => ({dim:'',unit:'',eq:'',ref:'',desc:'',...n}));
+        edges = d.edges || edges;
+        clearSelection();
+        renderList();
+        renderCanvas();
+      } catch(e) { alert('JSON 파싱 오류'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+// ── Tooltip ──
+const tooltip = document.getElementById('tooltip');
+
+function highlightEdges(id) {
+  svgEl.querySelectorAll('.edge-path').forEach(p => {
+    const from = p.getAttribute('data-from');
+    const to   = p.getAttribute('data-to');
+    if (from === id) {
+      p.setAttribute('stroke', '#4a9eff');
+      p.setAttribute('stroke-width', '2');
+      p.setAttribute('opacity', '1');
+      p.setAttribute('marker-end', 'url(#arr-out)');
+    } else if (to === id) {
+      p.setAttribute('stroke', '#ff7043');
+      p.setAttribute('stroke-width', '2');
+      p.setAttribute('opacity', '1');
+      p.setAttribute('marker-end', 'url(#arr-in)');
+    } else {
+      p.setAttribute('stroke', '#333');
+      p.setAttribute('stroke-width', '0.8');
+      p.setAttribute('opacity', '0.25');
+      p.setAttribute('marker-end', 'url(#arr)');
+    }
+  });
+}
+
+function unhighlightEdges() {
+  svgEl.querySelectorAll('.edge-path').forEach(p => {
+    p.setAttribute('stroke', '#555');
+    p.setAttribute('stroke-width', '1');
+    p.setAttribute('opacity', '0.5');
+    p.setAttribute('marker-end', 'url(#arr)');
+  });
+}
+
+function showTooltip(e, n) {
+  document.getElementById('tt-label').textContent = n.label;
+  document.getElementById('tt-dim').textContent  = n.dim  || '-';
+  document.getElementById('tt-unit').textContent = n.unit || '-';
+  const eqRow = document.getElementById('tt-eq-row');
+  const refRow = document.getElementById('tt-ref-row');
+  if (n.eq)  { document.getElementById('tt-eq').textContent  = n.eq;  eqRow.style.display  = ''; }
+  else eqRow.style.display = 'none';
+  if (n.ref) { document.getElementById('tt-ref').textContent = n.ref; refRow.style.display = ''; }
+  else refRow.style.display = 'none';
+  const descEl = document.getElementById('tt-desc');
+  if (n.desc) { descEl.textContent = n.desc; descEl.style.display = ''; }
+  else { descEl.style.display = 'none'; }
+  tooltip.style.display = 'block';
+  highlightEdges(n.id);
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + 230 > window.innerWidth)  x = e.clientX - 230;
+  if (y + 120 > window.innerHeight) y = e.clientY - 120;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top  = y + 'px';
+}
+function hideTooltip() { tooltip.style.display = 'none'; unhighlightEdges(); }
+
+// ── Info overlay ──
+let infoTargetId = null;
+function openInfo(id) {
+  infoTargetId = id;
+  const n = nodes.find(n => n.id === id);
+  if (!n) return;
+  document.getElementById('info-title').textContent = n.label + ' 정보';
+  document.getElementById('inp-dim').value  = n.dim  || '';
+  document.getElementById('inp-unit').value = n.unit || '';
+  document.getElementById('inp-eq').value   = n.eq   || '';
+  document.getElementById('inp-ref').value  = n.ref  || '';
+  document.getElementById('inp-desc').value = n.desc || '';
+  document.getElementById('info-overlay').classList.add('open');
+}
+function closeInfo() {
+  document.getElementById('info-overlay').classList.remove('open');
+  infoTargetId = null;
+}
+function saveInfo() {
+  const n = nodes.find(n => n.id === infoTargetId);
+  if (n) {
+    n.dim  = document.getElementById('inp-dim').value.trim();
+    n.unit = document.getElementById('inp-unit').value.trim();
+    n.eq   = document.getElementById('inp-eq').value.trim();
+    n.ref  = document.getElementById('inp-ref').value.trim();
+    n.desc = document.getElementById('inp-desc').value.trim();
+  }
+  closeInfo();
+}
+document.getElementById('info-overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('info-overlay')) closeInfo();
+});
+
+// ── Init ──
+// 열릴 때 dag.json 파일 선택창 띄우기
+(function loadFromFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.json';
+  inp.style.display = 'none';
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:14px;font-family:inherit';
+  overlay.innerHTML = `
+    <div style="font-size:13px;color:#999;letter-spacing:0.1em;text-transform:uppercase">DAG Editor</div>
+    <div style="font-size:14px;color:#e0e0e0">dag.json 파일을 선택하세요</div>
+    <label style="padding:8px 20px;background:#4a9eff;color:#fff;border-radius:4px;cursor:pointer;font-size:13px">
+      파일 선택
+      <input type="file" accept=".json" style="display:none" id="init-file-inp">
+    </label>
+    <div style="font-size:11px;color:#555">취소하면 기본값으로 시작합니다</div>`;
+
+  document.body.appendChild(overlay);
+
+  const fileInp = overlay.querySelector('#init-file-inp');
+  fileInp.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        nodes = (d.nodes || nodes).map(n => ({dim:'',unit:'',eq:'',ref:'',desc:'',...n}));
+        edges = (d.edges || edges).map(e => typeof e === 'object' ? e : {from:e[0],to:e[1]});
+        // 커스텀 색상 복원
+        nodes.forEach(n => {
+          if (!CATS.find(c => c.id === n.cat)) {
+            CATS.push({id:n.cat, bg:'#333', color:'#ccc', _custom:true});
+          }
+        });
+      } catch(e) { alert('JSON 파싱 오류'); }
+      overlay.remove();
+      renderList();
+      renderCanvas();
+    };
+    r.readAsText(f);
+  });
+
+  // 닫기 (취소)
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) {
+      overlay.remove();
+      renderList();
+      renderCanvas();
+    }
+  });
+})();
+
+window.addEventListener('resize', redrawEdges);
+</script>
+</body>
+</html>

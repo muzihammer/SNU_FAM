@@ -1,0 +1,578 @@
+{
+  "nodes": [
+    {
+      "dim": "[Nt]",
+      "unit": "K",
+      "eq": "interp(t, S.T_surf)",
+      "ref": "",
+      "desc": "",
+      "id": "n-Ts",
+      "label": "T_surf",
+      "cat": "teal",
+      "x": 2,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nt]",
+      "unit": "K",
+      "eq": "interp(t, S.T_basal)",
+      "ref": "",
+      "desc": "",
+      "id": "n-Tb",
+      "label": "T_basal",
+      "cat": "teal",
+      "x": 6,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nt]",
+      "unit": "m/s",
+      "eq": "interp(t, S.A_ieq)",
+      "ref": "",
+      "desc": "",
+      "id": "n-Ai",
+      "label": "A_ieq",
+      "cat": "teal",
+      "x": 10,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nt]",
+      "unit": "Pa",
+      "eq": "interp(t, S.p_atm)",
+      "ref": "",
+      "desc": "",
+      "id": "n-pa",
+      "label": "p_atm",
+      "cat": "teal",
+      "x": 14,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nt]",
+      "unit": "ppm or ppb",
+      "eq": "interp(t, S.C_atm)",
+      "ref": "",
+      "desc": "",
+      "id": "n-Ca",
+      "label": "C_atm",
+      "cat": "teal",
+      "x": 18,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "interp(z, file)",
+      "ref": "",
+      "desc": "",
+      "id": "n-tDZ",
+      "label": "tau_inv_DZ",
+      "cat": "teal",
+      "x": 26,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "interp(z, file)",
+      "ref": "",
+      "desc": "",
+      "id": "n-tLIZ",
+      "label": "tau_inv_LIZ",
+      "cat": "teal",
+      "x": 31,
+      "y": 3,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "K",
+      "eq": "∂T/∂t PDE (Backward Euler)",
+      "ref": "Alley & Koci, 2000",
+      "desc": "",
+      "id": "n-T",
+      "label": "T",
+      "cat": "purple",
+      "x": 2,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "kg/m³",
+      "eq": "∂ρ/∂t PDE (Backward Euler, Newton Raphson)",
+      "ref": "",
+      "desc": "",
+      "id": "n-rho",
+      "label": "rho",
+      "cat": "blue",
+      "x": 6,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "1 - ρ/ρ_ice",
+      "ref": "",
+      "desc": "",
+      "id": "n-s",
+      "label": "s",
+      "cat": "blue",
+      "x": 6,
+      "y": 9,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "0.37·s·(s/s_co_bar)^-7.6",
+      "ref": "Goujon 2003",
+      "desc": "",
+      "id": "n-scl",
+      "label": "s_cl",
+      "cat": "blue",
+      "x": 6,
+      "y": 12,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m_ice",
+      "eq": "∫ρ dz / ρ_ice",
+      "ref": "",
+      "desc": "",
+      "id": "n-iez",
+      "label": "iez",
+      "cat": "gray",
+      "x": 22,
+      "y": 9,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "1 - iez/H",
+      "ref": "Nye model",
+      "desc": "",
+      "id": "n-Xi",
+      "label": "Xi",
+      "cat": "gray",
+      "x": 22,
+      "y": 12,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "A·(ρ_ice/ρ)·(1-iez/H)",
+      "ref": "Nye model",
+      "desc": "",
+      "id": "n-wice",
+      "label": "w_ice",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 12,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "s - s_cl",
+      "ref": "",
+      "desc": "",
+      "id": "n-sop",
+      "label": "s_op",
+      "cat": "blue",
+      "x": 6,
+      "y": 15,
+      "hidden": false
+    },
+    {
+      "dim": "[M]",
+      "unit": "Pa",
+      "eq": "∂p/∂t PDE (Backward Euler)",
+      "ref": "Buizert 2016 Eq.8",
+      "desc": "",
+      "id": "n-pop",
+      "label": "p_op",
+      "cat": "coral",
+      "x": 14,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "-",
+      "eq": "s_op·(p_op/P0)·(T0/T)",
+      "ref": "Buizert 2011",
+      "desc": "",
+      "id": "n-sstar",
+      "label": "s_op_star",
+      "cat": "blue",
+      "x": 6,
+      "y": 18,
+      "hidden": false
+    },
+    {
+      "dim": "[M]",
+      "unit": "m²/s",
+      "eq": "D0·exp(-z/H)",
+      "ref": "",
+      "desc": "",
+      "id": "n-Deddy",
+      "label": "D_eddy",
+      "cat": "custom-green",
+      "x": 31,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[M]",
+      "unit": "m²/s",
+      "eq": "D_X_0 · τ_DZ",
+      "ref": "",
+      "desc": "",
+      "id": "n-DX",
+      "label": "D_X",
+      "cat": "custom-green",
+      "x": 26,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "Pa",
+      "eq": "p_cl·s_cl·ρ/T = const",
+      "ref": "이상기체 법칙",
+      "desc": "",
+      "id": "n-pcl",
+      "label": "p_cl",
+      "cat": "coral",
+      "x": 14,
+      "y": 15,
+      "hidden": false
+    },
+    {
+      "dim": "[M]",
+      "unit": "ppm or ppb",
+      "eq": "Crank-Nicolson PDE",
+      "ref": "Buizert 2011 Eq.5.16",
+      "desc": "",
+      "id": "n-Cop",
+      "label": "C_op",
+      "cat": "custom-pink",
+      "x": 18,
+      "y": 6,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "ppm",
+      "eq": "mol-weighted avg",
+      "ref": "Buizert 2011",
+      "desc": "",
+      "id": "n-Ccl",
+      "label": "C_cl",
+      "cat": "custom-pink",
+      "x": 18,
+      "y": 15,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "(φ_COD·ξ/ξ_COD - φ_cl)/s*",
+      "ref": "Buizert 2011 Eq.5.1",
+      "desc": "",
+      "id": "n-wair",
+      "label": "w_air",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 21,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "s",
+      "eq": "∫ dz/w_ice",
+      "ref": "",
+      "desc": "",
+      "id": "n-eta",
+      "label": "eta",
+      "cat": "gray",
+      "x": 22,
+      "y": 18,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "s*_op · w_air",
+      "ref": "Buizert 2011 Eq.5.1",
+      "desc": "",
+      "id": "n-phop",
+      "label": "phi_op",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 24,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m/s",
+      "eq": "s_cl·(p_cl/P0)·(T0/T)·w_ice",
+      "ref": "Buizert 2011 Eq.5.2",
+      "desc": "",
+      "id": "n-phcl",
+      "label": "phi_cl",
+      "cat": "custom-cyan",
+      "x": 10,
+      "y": 18,
+      "hidden": false
+    },
+    {
+      "dim": "[Nz]",
+      "unit": "m³/kg",
+      "eq": "s_cl/ρ·(p_cl/P0)·(T0/T)",
+      "ref": "Martinerie 1994",
+      "desc": "",
+      "id": "n-xair",
+      "label": "x_air",
+      "cat": "amber",
+      "x": 2,
+      "y": 18,
+      "hidden": false
+    },
+    {
+      "dim": "-",
+      "unit": "mieq",
+      "eq": "",
+      "ref": "",
+      "desc": "Ice Thickness",
+      "id": "n-1778054093700",
+      "label": "H",
+      "cat": "teal",
+      "x": 22,
+      "y": 3,
+      "hidden": false
+    }
+  ],
+  "edges": [
+    {
+      "from": "n-Ts",
+      "to": "n-T"
+    },
+    {
+      "from": "n-Tb",
+      "to": "n-T"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-s"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-iez"
+    },
+    {
+      "from": "n-s",
+      "to": "n-scl"
+    },
+    {
+      "from": "n-iez",
+      "to": "n-Xi"
+    },
+    {
+      "from": "n-Ai",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-sop"
+    },
+    {
+      "from": "n-pa",
+      "to": "n-pop"
+    },
+    {
+      "from": "n-sop",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-T",
+      "to": "n-sstar"
+    },
+    {
+      "from": "n-tLIZ",
+      "to": "n-Deddy"
+    },
+    {
+      "from": "n-tDZ",
+      "to": "n-DX"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-T",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-Ca",
+      "to": "n-Cop"
+    },
+    {
+      "from": "n-sstar",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-Xi",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-eta"
+    },
+    {
+      "from": "n-wair",
+      "to": "n-phop"
+    },
+    {
+      "from": "n-sstar",
+      "to": "n-phop"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-T",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-phcl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-T",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-pcl",
+      "to": "n-xair"
+    },
+    {
+      "from": "n-s",
+      "to": "n-sop"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-pcl"
+    },
+    {
+      "from": "n-iez",
+      "to": "n-wice"
+    },
+    {
+      "from": "n-T",
+      "to": "n-wair"
+    },
+    {
+      "from": "n-Cop",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-wice",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-scl",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-pop",
+      "to": "n-Ccl"
+    },
+    {
+      "from": "n-1778054093700",
+      "to": "n-iez"
+    },
+    {
+      "from": "n-T",
+      "to": "n-rho"
+    },
+    {
+      "from": "n-rho",
+      "to": "n-T"
+    },
+    {
+      "from": "n-T",
+      "to": "n-pop"
+    },
+    {
+      "from": "n-T",
+      "to": "n-Cop"
+    },
+    {
+      "from": "n-DX",
+      "to": "n-Cop"
+    },
+    {
+      "from": "n-Deddy",
+      "to": "n-Cop"
+    }
+  ]
+}
